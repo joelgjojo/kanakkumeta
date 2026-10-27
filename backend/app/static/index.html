@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kanakku</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%231f6f5c%22/%3E%3Ctext x=%2216%22 y=%2223%22 font-size=%2220%22 text-anchor=%22middle%22 fill=%22white%22 font-family=%22sans-serif%22%3E%E2%82%B9%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f6f1e7; --paper: #fffdf8; --ink: #2b2520; --muted: #7a6f63; --line: #e3d9c8;
+    --accent: #1f6f5c; --accent-ink: #fff; --credit: #b4462b; --repay: #1f6f5c;
+    --warn-bg: #fff4d6; --warn: #8a5a00; --hard-bg: #fde8e4; --hard: #a3301b; --info-bg: #e8f0fb; --info: #2d5a8c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1916; --paper: #24211d; --ink: #eee6da; --muted: #a59a8c; --line: #3a352e;
+      --accent: #4fb396; --accent-ink: #10201b; --credit: #e98a6f; --repay: #4fb396;
+      --warn-bg: #3a2f14; --warn: #f1c46a; --hard-bg: #40201a; --hard: #f39a85; --info-bg: #1d2a3a; --info: #9cc1ec;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.45 system-ui, -apple-system, "Segoe UI", "Noto Sans Malayalam", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 16px 16px 64px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.02em; }
+  h1 small { font-size: .9rem; color: var(--muted); font-weight: 500; margin-left: 6px; }
+  h2 { font-size: 1.05rem; margin: 28px 0 10px; }
+  .status { font-size: .8rem; color: var(--muted); }
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+  .stat { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .stat b { display: block; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: .75rem; color: var(--muted); }
+  textarea, input, select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line);
+                            border-radius: 8px; padding: 9px 10px; width: 100%; }
+  textarea { resize: vertical; min-height: 64px; }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+           border-radius: 8px; padding: 9px 14px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: progress; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > .grow { flex: 1 1 160px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .tabs button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .muted { color: var(--muted); font-size: .85rem; }
+  .err { background: var(--hard-bg); color: var(--hard); border-radius: 8px; padding: 10px; margin-top: 10px; }
+  .note { background: var(--info-bg); color: var(--info); border-radius: 8px; padding: 10px; margin-top: 10px; }
+  .photo { position: relative; margin-top: 12px; border-radius: 8px; overflow: hidden; }
+  .photo img { display: block; width: 100%; }
+  .box { position: absolute; border: 2px solid var(--warn); background: rgba(241,196,106,.12); border-radius: 3px; }
+  .box.on { border-color: var(--accent); background: rgba(79,179,150,.25); }
+  .box i { position: absolute; top: -2px; left: -2px; background: var(--warn); color: #000; font: 700 11px/1 system-ui;
+           padding: 2px 4px; font-style: normal; }
+  .box.on i { background: var(--accent); color: var(--accent-ink); }
+  .entry { margin-top: 12px; }
+  .entry.done { opacity: .75; }
+  .entry-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .pill { font-size: .72rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+  .pill.ready { background: var(--info-bg); color: var(--info); }
+  .pill.review { background: var(--warn-bg); color: var(--warn); }
+  .evidence { font-family: ui-monospace, Menlo, monospace; font-size: .85rem; background: var(--bg);
+              border-left: 3px solid var(--line); padding: 4px 8px; margin: 0 0 10px; word-break: break-word; }
+  .fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  .fields label { display: flex; flex-direction: column; gap: 3px; font-size: .75rem; color: var(--muted); }
+  .fields label.wide { grid-column: 1 / -1; }
+  .fields label.bad input, .fields label.bad .seg { outline: 2px solid var(--hard); outline-offset: 1px; border-radius: 8px; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1; border: 0; border-radius: 0; padding: 9px 4px; font-size: .9rem; background: var(--bg); }
+  .seg button[aria-pressed="true"].credit { background: var(--credit); color: #fff; }
+  .seg button[aria-pressed="true"].repay { background: var(--repay); color: #fff; }
+  .flags { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+  .flags li { border-radius: 8px; padding: 7px 10px; font-size: .88rem; }
+  .flags li.hard { background: var(--hard-bg); color: var(--hard); }
+  .flags li.soft { background: var(--warn-bg); color: var(--warn); }
+  .flags li.info { background: var(--info-bg); color: var(--info); }
+  .flags label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .flags input[type=checkbox] { width: 18px; height: 18px; margin: 1px 0 0; flex: none; accent-color: var(--warn); }
+  .linkish { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; font-weight: 600; }
+  .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .saved { margin-top: 10px; font-weight: 600; color: var(--repay); }
+  .list { display: grid; gap: 6px; }
+  .cust { display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left; }
+  .amt { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .owes { color: var(--credit); }
+  .clear { color: var(--repay); }
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
+  td, th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: .75rem; }
+  td.r, th.r { text-align: right; }
+  tr.struck td { text-decoration: line-through; color: var(--muted); }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent;
+             border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Kanakku<small>കണക്ക്</small></h1>
+    <span class="status" id="health"></span>
+  </header>
+
+  <div class="stats" id="stats">
+    <div class="stat"><b id="s-credit">–</b><span>Credit given today</span></div>
+    <div class="stat"><b id="s-repaid">–</b><span>Repaid today</span></div>
+    <div class="stat"><b id="s-out">–</b><span>Total outstanding</span></div>
+  </div>
+
+  <h2>Add entries</h2>
+  <div class="card">
+    <div class="tabs">
+      <button type="button" data-tab="text" aria-pressed="true">Type</button>
+      <button type="button" data-tab="photo" aria-pressed="false">Photo of book</button>
+    </div>
+    <form id="text-form">
+      <textarea id="text-in" maxlength="2000" placeholder="Rajan 350 pattu, Suresh 200 thannu"></textarea>
+      <div class="row" style="margin-top:8px">
+        <span class="muted grow">Malayalam, Manglish or English. Ask a balance too: “Rajan ethra tharanam?”</span>
+        <button class="primary" type="submit">Read</button>
+      </div>
+    </form>
+    <form id="photo-form" hidden>
+      <input id="photo-in" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
+      <input id="hint-in" type="text" maxlength="300" placeholder="Optional note, e.g. “page is from October”" style="margin-top:8px">
+      <div class="row" style="margin-top:8px">
+        <span class="muted grow">Every row becomes a proposal. Nothing is saved until you confirm it.</span>
+        <button class="primary" type="submit">Read page</button>
+      </div>
+    </form>
+    <div id="extract-error" class="err" hidden></div>
+  </div>
+
+  <section id="proposal" hidden>
+    <h2 id="proposal-title">Check before saving</h2>
+    <div id="proposal-note" class="note" hidden></div>
+    <div id="photo-view" class="photo" hidden></div>
+    <div id="entries"></div>
+  </section>
+
+  <h2>Customers</h2>
+  <div id="customers" class="list"><span class="muted">No customers yet.</span></div>
+
+  <section id="history" hidden>
+    <h2 id="history-title"></h2>
+    <div class="card"><table><thead><tr><th>Date</th><th>Entry</th><th class="r">Amount</th><th class="r">Balance</th><th></th></tr></thead>
+      <tbody id="history-body"></tbody></table></div>
+  </section>
+</main>
+
+<script>
+const HARD = new Set(["unclear_direction", "missing_customer", "missing_amount", "invalid_amount", "illegible", "missing_date", "invalid_date"]);
+const SOFT = new Set(["uncertain_amount", "amount_from_balance", "possible_duplicate", "similar_customer", "overpayment"]);
+const FIELD_OF = { unclear_direction: "type", missing_customer: "name", missing_amount: "amount", invalid_amount: "amount",
+                   uncertain_amount: "amount", missing_date: "date", invalid_date: "date" };
+let FLAG_TEXT = {};
+let today = new Date().toISOString().slice(0, 10);
+
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const shortDate = d => new Date(d + "T00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+const rupees = n => n == null ? "–" : "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  let body = null;
+  try { body = await r.json(); } catch { /* empty body */ }
+  if (!r.ok) {
+    const err = new Error(detailText(body?.detail) || `HTTP ${r.status}`);
+    err.status = r.status; err.detail = body?.detail;
+    throw err;
+  }
+  return body;
+}
+const postJSON = (path, data) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+
+function detailText(d) {
+  if (!d) return "";
+  if (typeof d === "string") return d;
+  if (Array.isArray(d)) return d.map(x => `${(x.loc || []).slice(1).join(".")}: ${x.msg}`).join("; ");
+  if (d.error === "acknowledgement_required") return "Please tick the warnings below before saving.";
+  return JSON.stringify(d);
+}
+
+function busy(btn, on, label) {
+  if (on) { btn.dataset.label = btn.textContent; btn.innerHTML = `<span class="spinner"></span> ${label || ""}`; btn.disabled = true; }
+  else { btn.textContent = btn.dataset.label; btn.disabled = false; }
+}
+
+// ---------- header / summary / customers ----------
+async function loadHealth() {
+  try {
+    const h = await api("/api/health");
+    today = h.today;
+    $("#health").textContent = h.api_key_set ? h.model : "MODEL_API_KEY not set";
+  } catch { $("#health").textContent = "backend offline"; }
+  try { FLAG_TEXT = await api("/api/flags"); } catch { /* messages also come with each entry */ }
+}
+
+async function refresh() {
+  try {
+    const s = await api("/api/summary");
+    $("#s-credit").textContent = rupees(s.credit_given.total);
+    $("#s-repaid").textContent = rupees(s.repayments.total);
+    $("#s-out").textContent = rupees(s.total_outstanding);
+  } catch { /* leave old numbers */ }
+  try {
+    const cs = await api("/api/customers");
+    const box = $("#customers");
+    if (!cs.length) { box.innerHTML = '<span class="muted">No customers yet.</span>'; return; }
+    box.innerHTML = cs.map(c => `<button class="cust card" data-name="${esc(c.name)}">
+        <span>${esc(c.name)}</span>
+        <span class="amt ${c.balance > 0 ? "owes" : "clear"}">${c.balance > 0 ? "owes " + rupees(c.balance) : c.balance < 0 ? "advance " + rupees(-c.balance) : "settled"}</span>
+      </button>`).join("");
+  } catch { /* ignore */ }
+}
+
+$("#customers").addEventListener("click", e => {
+  const b = e.target.closest(".cust");
+  if (b) showHistory(b.dataset.name);
+});
+
+async function showHistory(name) {
+  const c = await api(`/api/customers/${encodeURIComponent(name)}`);
+  $("#history").hidden = false;
+  $("#history-title").textContent = `${c.name} — ${c.balance > 0 ? "owes " + rupees(c.balance) : "balance " + rupees(c.balance)}`;
+  const label = { credit_sale: "Credit", repayment: "Paid", reversal: "Undo" };
+  $("#history-body").innerHTML = c.history.map(t => `<tr class="${t.reversed ? "struck" : ""}">
+      <td style="white-space:nowrap">${esc(shortDate(t.date))}</td>
+      <td>${label[t.type]}${t.description ? " · " + esc(t.description) : ""}${t.acknowledged.length ? `<div class="muted">checked: ${esc(t.acknowledged.join(", "))}</div>` : ""}</td>
+      <td class="r">${t.type === "repayment" ? "−" : t.type === "reversal" ? "" : "+"}${rupees(t.amount)}</td>
+      <td class="r">${rupees(t.running_balance)}</td>
+      <td class="r">${t.type !== "reversal" && !t.reversed ? `<button class="linkish" data-undo="${t.id}">undo</button>` : ""}</td>
+    </tr>`).join("");
+  $("#history").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("#history-body").addEventListener("click", async e => {
+  const id = e.target.dataset.undo;
+  if (!id || !confirm("Undo this entry? It stays in the history as reversed.")) return;
+  const name = $("#history-title").textContent.split(" — ")[0];
+  try {
+    await api(`/api/transactions/${id}/reverse?reason=${encodeURIComponent("undone by shopkeeper")}`, { method: "POST" });
+    await refresh(); await showHistory(name);
+  } catch (err) { alert(err.message); }
+});
+
+// ---------- input ----------
+document.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("[data-tab]").forEach(x => x.setAttribute("aria-pressed", x === b));
+  $("#text-form").hidden = b.dataset.tab !== "text";
+  $("#photo-form").hidden = b.dataset.tab !== "photo";
+}));
+
+function showError(msg) { const el = $("#extract-error"); el.textContent = msg; el.hidden = !msg; }
+
+$("#text-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const text = $("#text-in").value.trim();
+  if (!text) return;
+  const btn = e.submitter || $("button[type=submit]", e.target);
+  busy(btn, true, "Reading"); showError("");
+  try { renderProposal(await postJSON("/api/extract/text", { text }), null); $("#text-in").value = ""; }
+  catch (err) { showError(err.message); }
+  finally { busy(btn, false); }
+});
+
+$("#photo-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = $("#photo-in").files[0];
+  if (!f) { showError("Choose a photo first."); return; }
+  const fd = new FormData();
+  fd.append("file", f);
+  fd.append("hint", $("#hint-in").value.trim());
+  const btn = e.submitter || $("button[type=submit]", e.target);
+  busy(btn, true, "Reading page"); showError("");
+  try { const r = await api("/api/extract/image", { method: "POST", body: fd }); renderProposal(r, r.source_ref); }
+  catch (err) { showError(err.message); }
+  finally { busy(btn, false); }
+});
+
+// ---------- proposal review ----------
+let current = null;
+
+function renderProposal(p, sourceRef) {
+  current = p;
+  $("#proposal").hidden = false;
+  const note = $("#proposal-note");
+  let noteText = p.note || "";
+  if (p.intent === "balance_query") {
+    const a = p.balance_answer;
+    noteText = !a ? "That looks like a question, but no customer name was found."
+      : a.balance == null ? `${a.customer}: ${a.message}.`
+      : `${a.customer} ${a.balance > 0 ? "owes " + rupees(a.balance) : "has balance " + rupees(a.balance)} (from the ledger).`;
+  } else if (p.intent === "not_ledger") {
+    noteText = "No credit or repayment here (e.g. a cash sale), so nothing to save." + (p.note ? " " + p.note : "");
+  } else if (p.intent === "unclear") {
+    noteText = "Couldn't understand this. " + (p.note || "Try rephrasing.");
+  }
+  note.textContent = noteText; note.hidden = !noteText;
+
+  $("#proposal-title").textContent = p.entries.length
+    ? `Check before saving (${p.entries.length} ${p.entries.length === 1 ? "entry" : "entries"})` : "Result";
+
+  const pv = $("#photo-view");
+  if (sourceRef) {
+    pv.hidden = false;
+    pv.innerHTML = `<img src="/api/sources/${encodeURIComponent(sourceRef)}" alt="Uploaded ledger page">` +
+      p.entries.filter(e => Array.isArray(e.box) && e.box.length === 4).map(e => {
+        const [x0, y0, x1, y1] = e.box.map(v => Math.max(0, Math.min(1000, v)) / 10);
+        return `<div class="box" data-box="${e.index}" style="left:${x0}%;top:${y0}%;width:${x1 - x0}%;height:${y1 - y0}%"><i>${e.index + 1}</i></div>`;
+      }).join("");
+  } else { pv.hidden = true; pv.innerHTML = ""; }
+
+  const host = $("#entries");
+  host.innerHTML = "";
+  p.entries.forEach(e => host.appendChild(entryCard(e)));
+  $("#proposal").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function entryCard(e) {
+  const el = document.createElement("div");
+  el.className = "card entry";
+  el.dataset.index = e.index;
+  const bad = new Set(e.flags.filter(f => HARD.has(f)).map(f => FIELD_OF[f]).filter(Boolean));
+  const type = e.transaction_type;
+  el.innerHTML = `
+    <div class="entry-head">
+      <b>#${e.index + 1}${e.matched_customer ? ` · ${esc(e.matched_customer)} owes ${rupees(e.current_balance)}` : ""}</b>
+      <span class="pill ${e.status === "ready" ? "ready" : "review"}">${e.status === "ready" ? "Looks right" : "Needs your check"}</span>
+    </div>
+    ${e.evidence ? `<p class="evidence">${esc(e.evidence)}</p>` : ""}
+    <div class="fields">
+      <label class="wide ${bad.has("name") ? "bad" : ""}">Customer<input name="name" value="${esc(e.customer_name)}" placeholder="Name"></label>
+      <label class="wide ${bad.has("type") ? "bad" : ""}">What happened
+        <div class="seg" role="group">
+          <button type="button" class="credit" data-type="credit_sale" aria-pressed="${type === "credit_sale"}">Took on credit (pattu)</button>
+          <button type="button" class="repay" data-type="repayment" aria-pressed="${type === "repayment"}">Paid back (thannu)</button>
+        </div></label>
+      <label class="${bad.has("amount") || e.flags.includes("uncertain_amount") ? "bad" : ""}">Amount (₹)<input name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" value="${e.amount ?? ""}"></label>
+      <label class="${bad.has("date") ? "bad" : ""}">Date<input name="date" type="date" max="${today}" value="${esc(e.transaction_date || "")}"></label>
+      <label class="wide">Items (optional)<input name="desc" value="${esc(e.description)}"></label>
+    </div>
+    <ul class="flags">${e.flags.map(f => flagItem(f, e)).join("")}</ul>
+    <div class="err" hidden></div>
+    <div class="actions">
+      <button type="button" data-act="skip">Skip</button>
+      <button type="button" class="primary" data-act="confirm">Save</button>
+    </div>`;
+
+  el.querySelectorAll("[data-type]").forEach(b => b.addEventListener("click", () =>
+    el.querySelectorAll("[data-type]").forEach(x => x.setAttribute("aria-pressed", x === b))));
+  el.querySelector("[data-use-name]")?.addEventListener("click", ev => {
+    el.querySelector("input[name=name]").value = ev.target.dataset.useName;
+    ev.target.closest("li").remove();
+  });
+  el.querySelector("[data-act=skip]").addEventListener("click", () => skipEntry(el, e));
+  el.querySelector("[data-act=confirm]").addEventListener("click", () => confirmEntry(el, e));
+  const hl = on => document.querySelector(`[data-box="${e.index}"]`)?.classList.toggle("on", on);
+  el.addEventListener("mouseenter", () => hl(true));
+  el.addEventListener("mouseleave", () => hl(false));
+  el.addEventListener("focusin", () => hl(true));
+  el.addEventListener("focusout", () => hl(false));
+  return el;
+}
+
+function flagItem(f, e) {
+  const msg = esc(e.flag_messages?.[f] || FLAG_TEXT[f] || f);
+  if (HARD.has(f)) return `<li class="hard" data-flag="${f}">${msg}</li>`;
+  if (SOFT.has(f)) {
+    let extra = "";
+    if (f === "similar_customer" && e.similar_to)
+      extra = ` <button type="button" class="linkish" data-use-name="${esc(e.similar_to)}">Use “${esc(e.similar_to)}”</button>`;
+    if (f === "possible_duplicate" && e.duplicate_of && e.duplicate_of.startsWith("entry #"))
+      extra = ` (same as ${esc(e.duplicate_of)})`;
+    return `<li class="soft" data-flag="${f}"><label><input type="checkbox" data-ack="${f}"><span>${msg}${extra} <b>I checked this.</b></span></label></li>`;
+  }
+  return `<li class="info" data-flag="${f}">${msg}</li>`;
+}
+
+function readCard(el) {
+  return {
+    name: el.querySelector("input[name=name]").value.trim(),
+    type: el.querySelector("[data-type][aria-pressed=true]")?.dataset.type || null,
+    amount: parseFloat(el.querySelector("input[name=amount]").value),
+    date: el.querySelector("input[name=date]").value,
+    desc: el.querySelector("input[name=desc]").value.trim() || null,
+    acks: [...el.querySelectorAll("[data-ack]:checked")].map(x => x.dataset.ack),
+  };
+}
+
+function cardError(el, msg) { const box = el.querySelector(".err"); box.textContent = msg; box.hidden = !msg; }
+
+async function confirmEntry(el, e) {
+  const v = readCard(el);
+  const missing = [];
+  if (!v.name) missing.push("customer name");
+  if (!v.type) missing.push("credit or paid back");
+  if (!(v.amount > 0)) missing.push("amount");
+  if (!v.date) missing.push("date");
+  if (missing.length) { cardError(el, "Please fill: " + missing.join(", ") + "."); return; }
+  const unticked = [...el.querySelectorAll("[data-ack]:not(:checked)")].map(x => x.dataset.ack);
+  if (unticked.length) { cardError(el, "Tick each warning to show you checked it."); return; }
+  cardError(el, "");
+  const btn = el.querySelector("[data-act=confirm]");
+  busy(btn, true, "Saving");
+  try {
+    const r = await postJSON(`/api/proposals/${current.proposal_id}/confirm`, {
+      index: e.index, customer_name: v.name, transaction_type: v.type, amount: v.amount,
+      transaction_date: v.date, description: v.desc, acknowledged: v.acks,
+    });
+    finish(el, `Saved. ${r.customer} ${r.balance > 0 ? "now owes " + rupees(r.balance) : r.balance < 0 ? "has an advance of " + rupees(-r.balance) : "is settled"}.`);
+    refresh();
+  } catch (err) {
+    busy(btn, false);
+    if (err.status === 409 && err.detail?.flags) {
+      // The server re-checked the final values and found warnings we haven't shown yet.
+      const ul = el.querySelector(".flags");
+      err.detail.flags.forEach(f => {
+        if (!ul.querySelector(`[data-ack="${f}"]`)) ul.insertAdjacentHTML("beforeend", flagItem(f, e));
+      });
+    }
+    cardError(el, err.message);
+  }
+}
+
+async function skipEntry(el, e) {
+  try {
+    await postJSON(`/api/proposals/${current.proposal_id}/skip`, { index: e.index });
+    finish(el, "Skipped. Nothing saved.");
+  } catch (err) { cardError(el, err.message); }
+}
+
+function finish(el, msg) {
+  el.classList.add("done");
+  el.querySelectorAll("input, button").forEach(x => x.disabled = true);
+  el.querySelector(".actions").outerHTML = `<div class="saved">${esc(msg)}</div>`;
+}
+
+loadHealth().then(refresh);
+</script>
+</body>
+</html>

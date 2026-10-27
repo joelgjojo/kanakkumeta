@@ -1,0 +1,121 @@
+"""Typed shapes for everything that crosses a boundary.
+
+ModelEntry / ModelOutput  = what Muse Spark is allowed to say (enforced by structured output).
+ProposedEntry             = what the app shows the shopkeeper after deterministic checks.
+ConfirmRequest            = what the shopkeeper sends back.
+"""
+from __future__ import annotations
+
+from datetime import date
+from enum import Enum
+from typing import Literal, Optional
+
+from pydantic import BaseModel, Field
+
+
+class TxType(str, Enum):
+    credit_sale = "credit_sale"   # customer took goods on credit (pattu / kadam) -> balance goes UP
+    repayment = "repayment"       # customer paid back (thannu / adachu)          -> balance goes DOWN
+
+
+class Flag(str, Enum):
+    # Flags the MODEL may raise (it is told to raise these instead of guessing)
+    unclear_direction = "unclear_direction"
+    missing_customer = "missing_customer"
+    missing_amount = "missing_amount"
+    uncertain_amount = "uncertain_amount"
+    illegible = "illegible"
+    missing_date = "missing_date"
+    # Flags only CODE raises
+    invalid_amount = "invalid_amount"
+    amount_from_balance = "amount_from_balance"
+    possible_duplicate = "possible_duplicate"
+    similar_customer = "similar_customer"
+    new_customer = "new_customer"
+    overpayment = "overpayment"
+    invalid_date = "invalid_date"
+
+
+MODEL_FLAGS = [
+    Flag.unclear_direction, Flag.missing_customer, Flag.missing_amount,
+    Flag.uncertain_amount, Flag.illegible, Flag.missing_date,
+]
+
+# Hard flags = a required field is missing/invalid. Cannot be confirmed until the user fills it.
+HARD_FLAGS = {
+    Flag.unclear_direction, Flag.missing_customer, Flag.missing_amount,
+    Flag.invalid_amount, Flag.illegible, Flag.missing_date, Flag.invalid_date,
+}
+# Soft flags = values exist but a human must explicitly acknowledge them.
+SOFT_FLAGS = {
+    Flag.uncertain_amount, Flag.amount_from_balance, Flag.possible_duplicate,
+    Flag.similar_customer, Flag.overpayment,
+}
+# Info flags = shown, never block.
+INFO_FLAGS = {Flag.new_customer}
+
+
+class ModelEntry(BaseModel):
+    customer_name: Optional[str] = None
+    transaction_type: Optional[TxType] = None
+    amount: Optional[float] = None
+    amount_text: Optional[str] = None          # the amount exactly as written, e.g. "2oo", "-350"
+    transaction_date: Optional[str] = None     # YYYY-MM-DD
+    description: Optional[str] = None
+    paid_in_full: bool = False
+    flags: list[Flag] = Field(default_factory=list)
+    evidence: Optional[str] = None             # the exact snippet of input this came from
+    box: Optional[list[int]] = None            # image only: [x_min, y_min, x_max, y_max] on 0-1000 grid
+
+
+class ModelOutput(BaseModel):
+    intent: Literal["transactions", "balance_query", "not_ledger", "unclear"]
+    entries: list[ModelEntry] = Field(default_factory=list)
+    query_customer: Optional[str] = None
+    note: Optional[str] = None
+
+
+class ProposedEntry(BaseModel):
+    index: int
+    customer_name: Optional[str]
+    transaction_type: Optional[TxType]
+    amount: Optional[float]
+    transaction_date: Optional[str]
+    description: Optional[str]
+    evidence: Optional[str]
+    box: Optional[list[int]]
+    flags: list[Flag]
+    flag_messages: dict[str, str]
+    matched_customer: Optional[str] = None     # existing ledger name this maps to, if any
+    similar_to: Optional[str] = None
+    duplicate_of: Optional[str] = None         # transaction id
+    current_balance: Optional[float] = None
+    status: Literal["needs_review", "ready"]
+
+
+class ExtractionResult(BaseModel):
+    proposal_id: str
+    source_type: Literal["text", "image"]
+    source_ref: Optional[str]
+    raw_input: Optional[str]
+    intent: str
+    note: Optional[str]
+    entries: list[ProposedEntry]
+    balance_answer: Optional[dict] = None
+    model: str
+    cached: bool
+    usage: Optional[dict] = None
+
+
+class ConfirmRequest(BaseModel):
+    index: int
+    customer_name: str
+    transaction_type: TxType
+    amount: float = Field(gt=0, le=10_000_000)
+    transaction_date: date
+    description: Optional[str] = None
+    acknowledged: list[Flag] = Field(default_factory=list)
+
+
+class SkipRequest(BaseModel):
+    index: int
