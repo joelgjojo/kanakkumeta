@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import accuracy, extractor, reminders
+from . import accuracy, demo, extractor, reminders
 from .config import settings
 from .ledger import AmbiguousCustomer, Ledger
 from .pipeline import build_proposal
@@ -33,17 +35,68 @@ def today() -> date:
     return datetime.now(ZoneInfo(settings.timezone)).date()
 
 
+# ---------- access code + daily AI cap: a public link must not be able to spend the shop's credits ----------
+ACCESS_COOKIE = "kanakku_access"
+OPEN_PATHS = {"/api/health", "/api/login"}
+
+
+def _access_token() -> str:
+    return hashlib.sha256(f"kanakku|{settings.access_code}".encode()).hexdigest()
+
+
+@app.middleware("http")
+async def require_access_code(request: Request, call_next):
+    path = request.url.path
+    if settings.access_code and path.startswith("/api/") and path not in OPEN_PATHS:
+        if not hmac.compare_digest(request.cookies.get(ACCESS_COOKIE, ""), _access_token()):
+            return JSONResponse({"detail": "access_code_required"}, status_code=401)
+    return await call_next(request)
+
+
+class LoginIn(BaseModel):
+    code: str = Field(max_length=100)
+
+
+@app.post("/api/login")
+def login(body: LoginIn, request: Request, response: Response):
+    if settings.access_code:
+        if not hmac.compare_digest(body.code.strip(), settings.access_code):
+            time.sleep(1)  # slow down guessing
+            raise HTTPException(401, "Wrong access code")
+        https = request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+        response.set_cookie(ACCESS_COOKIE, _access_token(), max_age=60 * 60 * 24 * 30, httponly=True,
+                            samesite="lax", secure=https)
+    return {"ok": True}
+
+
+_ai_calls = {"day": "", "count": 0}
+
+
+def spend_ai_call() -> None:
+    if not settings.max_ai_calls_per_day:
+        return
+    day = today().isoformat()
+    if _ai_calls["day"] != day:
+        _ai_calls.update(day=day, count=0)
+    if _ai_calls["count"] >= settings.max_ai_calls_per_day:
+        raise HTTPException(429, f"Today's AI limit ({settings.max_ai_calls_per_day} readings) is used up. "
+                                 "Saved entries, balances and reminders still work.")
+    _ai_calls["count"] += 1
+
+
 class TextIn(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "model": settings.model, "api_key_set": bool(settings.api_key), "today": today().isoformat()}
+    return {"ok": True, "model": settings.model, "api_key_set": bool(settings.api_key), "today": today().isoformat(),
+            "locked": bool(settings.access_code)}
 
 
 @app.post("/api/extract/text", response_model=ExtractionResult)
 def extract_text(body: TextIn):
+    spend_ai_call()
     try:
         ext = extractor.extract_text(body.text, today().isoformat())
     except extractor.ExtractionError as e:
@@ -56,6 +109,7 @@ async def extract_image(file: UploadFile = File(...), hint: str = Form("")):
     data = await file.read()
     if len(data) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "Image too large (max 10 MB)")
+    spend_ai_call()
     mime = file.content_type or extractor.guess_mime(file.filename or "")
     ref = hashlib.sha256(data).hexdigest()[:16]
     ext_ = {"image/png": ".png", "image/webp": ".webp"}.get(mime, ".jpg")
@@ -79,6 +133,7 @@ async def extract_voice(file: UploadFile = File(...)):
         extractor.check_wav(data)
     except extractor.ExtractionError as e:
         raise HTTPException(422, detail=str(e))
+    spend_ai_call()
     ref = hashlib.sha256(data).hexdigest()[:16] + ".wav"
     UPLOADS.mkdir(parents=True, exist_ok=True)
     (UPLOADS / ref).write_bytes(data)
@@ -228,6 +283,15 @@ def summary(day: Optional[str] = None):
     out["overdue"] = {"count": len(overdue), "total": sum(r["balance"] for r in overdue),
                       "default_days": settings.overdue_days}
     return out
+
+
+@app.post("/api/demo")
+def load_demo():
+    """Fill an EMPTY ledger with a small fictional shop, so a first-time visitor sees overdue, same names, etc."""
+    if ledger.customers():
+        raise HTTPException(409, "The ledger already has customers. The demo only loads into an empty ledger.")
+    demo.seed(ledger, today())
+    return {"ok": True, "customers": len(ledger.customers())}
 
 
 @app.get("/api/accuracy")

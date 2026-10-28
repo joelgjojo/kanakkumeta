@@ -32,6 +32,10 @@ class Settings:
     overdue_days: int = int(os.getenv("OVERDUE_DAYS", "30"))
     # Shown in WhatsApp reminders. Empty = "our shop".
     shop_name: str = os.getenv("SHOP_NAME", "")
+    # Set on any public deployment: the app asks for this code once per browser. Empty = open (local use).
+    access_code: str = os.getenv("ACCESS_CODE", "")
+    # Hard cap on model calls per day, to protect API credits. 0 = no cap.
+    max_ai_calls_per_day: int = int(os.getenv("MAX_AI_CALLS_PER_DAY", "0"))
     cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")
 
 

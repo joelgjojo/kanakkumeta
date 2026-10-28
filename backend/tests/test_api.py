@@ -223,3 +223,36 @@ def test_summary_reports_overdue(monkeypatch):
     assert s["overdue"]["count"] == 1 and s["overdue"]["total"] == 2400
     cid = client.get("/api/customers").json()[0]["id"]
     assert client.patch(f"/api/customers/{cid}", json={"overdue_days": 400}).status_code == 422
+
+
+def test_access_code_locks_the_api(monkeypatch):
+    object.__setattr__(main.settings, "access_code", "meta2026")
+    try:
+        c = TestClient(main.app)
+        assert c.get("/api/health").json()["locked"] is True          # health stays open
+        assert c.get("/api/customers").status_code == 401
+        assert c.post("/api/login", json={"code": "nope"}).status_code == 401
+        assert c.post("/api/login", json={"code": "meta2026"}).status_code == 200
+        assert c.get("/api/customers").status_code == 200              # cookie set by login
+        assert c.get("/").status_code == 200                           # the page itself always loads
+    finally:
+        object.__setattr__(main.settings, "access_code", "")
+
+
+def test_daily_ai_cap(monkeypatch):
+    monkeypatch.setattr(extractor, "extract_text", stub({"intent": "not_ledger", "entries": [],
+                                                         "query_customer": None, "note": None}))
+    object.__setattr__(main.settings, "max_ai_calls_per_day", 2)
+    monkeypatch.setitem(main._ai_calls, "count", 0)
+    try:
+        codes = [client.post("/api/extract/text", json={"text": "75 cash"}).status_code for _ in range(3)]
+        assert codes == [200, 200, 429]
+    finally:
+        object.__setattr__(main.settings, "max_ai_calls_per_day", 0)
+
+
+def test_demo_shop_only_into_empty_ledger():
+    assert client.post("/api/demo").json()["customers"] == 6
+    s = client.get("/api/summary").json()
+    assert s["overdue"]["count"] == 2 and s["overdue"]["total"] == 2500   # Rajan (auto driver) + Joseph
+    assert client.post("/api/demo").status_code == 409

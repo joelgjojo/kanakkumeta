@@ -69,9 +69,17 @@ Open http://localhost:8000 on a phone or laptop:
 - Tap a customer for their history with running balance, to add a WhatsApp number or note, or to **undo** an entry
   (undo appends a reversal; nothing is deleted).
 
-**Sample pages** in [`samples/`](samples/) (generated, fictional names): `page-no-total.png` (Latha's row has no
+**Sample pages** in [`backend/app/static/samples/`](backend/app/static/samples/) (also one tap in the app's Photo tab) (generated, fictional names): `page-no-total.png` (Latha's row has no
 direction, so the app asks), `page-total-matches.jpg` (written total ₹1,420, matches), `page-total-wrong.jpg` (written
 ₹1,470, so every row goes to review).
+
+## Deploy (Render)
+
+Live demo: **https://kanakkumeta.onrender.com** (access code in the submission). On Render: Web Service from this repo,
+Root Directory `backend`, Build `pip install -r requirements.txt`, Start
+`uvicorn app.main:app --host 0.0.0.0 --port $PORT`, a disk mounted at `/var/data`, and environment variables
+`MODEL_API_KEY`, `DATA_DIR=/var/data`, `PYTHON_VERSION=3.12.7`, `ACCESS_CODE` (asked once per browser) and
+`MAX_AI_CALLS_PER_DAY` (protects API credits). **Load a demo shop** fills an empty ledger with fictional customers.
 
 ## API
 
@@ -88,6 +96,8 @@ direction, so the app asks), `page-total-matches.jpg` (written total ₹1,420, m
 | POST | `/api/customers/{id}/remind` | log a reminder → message + WhatsApp link. 409 if reminded in the last 3 days, unless `recent_reminder` is acknowledged |
 | POST | `/api/transactions/{id}/reverse` | undo by appending a reversal |
 | GET | `/api/summary?day=` | credit given / repaid today, total outstanding, overdue count and total |
+| POST | `/api/login` | `{"code": "..."}` → cookie, when `ACCESS_CODE` is set |
+| POST | `/api/demo` | fill an empty ledger with a fictional demo shop |
 | GET | `/api/accuracy?days=30` | AI accuracy for this shop, from the shopkeeper's corrections, per input type |
 | GET | `/api/sources/{ref}` | the original photo or voice note, for evidence view |
 
@@ -132,7 +142,7 @@ backend/
     static/         the shopkeeper's review UI (single file, no build)
   eval/             labeled test set + scorer
   scripts/          ping.py, try_image.py
-  tests/            47 tests, no API key needed
+  tests/            50 tests, no API key needed
 ```
 
 All names and amounts in this repo are fictional.

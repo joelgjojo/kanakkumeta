@@ -104,4 +104,5 @@ The sample page was generated, not taken from a real shop. The next step is to r
 | Same-name customers, duplicate and overpayment checks | Built, unit- and API-tested |
 | WhatsApp reminders with a 3-day repeat guard | Built, tested |
 | Append-only ledger, undo, running balance | Built, tested |
-| 47 automated tests (no API key needed) | `pytest -q` |
+| Live demo with access code and a daily AI cap | https://kanakkumeta.onrender.com |
+| 50 automated tests (no API key needed) | `pytest -q` |
