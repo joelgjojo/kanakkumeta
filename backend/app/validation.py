@@ -31,6 +31,7 @@ MESSAGES = {
     Flag.invalid_date: "That date doesn't look right.",
     Flag.ambiguous_customer: "More than one customer has this name. Which one is it?",
     Flag.same_name_customer: "A customer with this name already exists. This opens a second, separate account.",
+    Flag.page_total_mismatch: "The rows don't add up to the total written on the page. Check this amount against the photo.",
 }
 
 
@@ -150,6 +151,32 @@ def check_all(entries: list[ModelEntry], *, ledger: Ledger, today: date, source_
     return out
 
 
+def check_page_total(entries: list[ProposedEntry], written: Optional[float]) -> Optional[dict]:
+    """Compare the total the shopkeeper WROTE with the rows the model READ. A mismatch means a misread row.
+
+    Shopkeepers total different things (credit only, everything, or net), so any of those matching counts.
+    On a mismatch every row with an amount must be checked against the photo before it can be saved.
+    """
+    if written is None:
+        return None
+    if any(e.amount is None or e.transaction_type is None for e in entries):
+        return {"written": written, "status": "incomplete",
+                "message": "Some rows have no amount or direction yet, so the page total can't be checked."}
+    credit = sum(e.amount for e in entries if e.transaction_type == TxType.credit_sale)
+    repaid = sum(e.amount for e in entries if e.transaction_type == TxType.repayment)
+    for basis, value in (("credit rows", credit), ("all rows", credit + repaid), ("credit minus payments", credit - repaid)):
+        if abs(value - written) < 0.005:
+            return {"written": written, "rows_sum": round(value, 2), "basis": basis, "status": "match",
+                    "message": f"Rows add up to the written total ({basis})."}
+    for e in entries:
+        e.flags.append(Flag.page_total_mismatch)
+        e.flag_messages[Flag.page_total_mismatch.value] = MESSAGES[Flag.page_total_mismatch]
+        e.status = "needs_review"
+    return {"written": written, "rows_sum": round(credit + repaid, 2), "credit_sum": round(credit, 2),
+            "status": "mismatch",
+            "message": "The rows don't add up to the total written on the page, so a row may be misread."}
+
+
 @dataclass
 class ConfirmPlan:
     customer_id: Optional[str]      # None = create a new customer on save
@@ -195,7 +222,7 @@ def plan_confirm(
         if tx_type == TxType.repayment and amount > ledger.balance(customer_id) + 0.001:
             need.add(Flag.overpayment)
     # If the model was unsure about the amount, the human must say "yes, I checked it".
-    for f in (Flag.uncertain_amount, Flag.amount_from_balance):
+    for f in (Flag.uncertain_amount, Flag.amount_from_balance, Flag.page_total_mismatch):
         if f.value in original_flags:
             need.add(f)
     return ConfirmPlan(customer_id=customer_id, need=need)

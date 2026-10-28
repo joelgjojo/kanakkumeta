@@ -193,3 +193,33 @@ def test_voice_endpoint(monkeypatch):
 
     bad = client.post("/api/extract/voice", files={"file": ("v.mp3", b"ID3 not a wav", "audio/mpeg")})
     assert bad.status_code == 422
+
+
+def test_accuracy_is_measured_from_corrections(monkeypatch):
+    monkeypatch.setattr(extractor, "extract_text", stub({"intent": "transactions", "entries": [
+        E(customer_name="Rajan", transaction_type="credit_sale", amount=350),
+        E(customer_name="Vinod", transaction_type="credit_sale", amount=200, amount_text="2oo", flags=["uncertain_amount"]),
+        E(customer_name="Latha", transaction_type="credit_sale", amount=30),     # really 300, NOT flagged
+        E(customer_name="Mary", transaction_type="credit_sale", amount=45)],
+        "query_customer": None, "note": None}))
+    r = client.post("/api/extract/text", json={"text": "four rows"}).json()
+    url = f"/api/proposals/{r['proposal_id']}/confirm"
+    base = {"transaction_type": "credit_sale", "transaction_date": r["entries"][0]["transaction_date"]}
+    client.post(url, json={**base, "index": 0, "customer_name": "Rajan", "amount": 350})
+    client.post(url, json={**base, "index": 1, "customer_name": "Vinod", "amount": 250, "acknowledged": ["uncertain_amount"]})
+    client.post(url, json={**base, "index": 2, "customer_name": "Latha", "amount": 300})
+    client.post(f"/api/proposals/{r['proposal_id']}/skip", json={"index": 3})
+
+    a = client.get("/api/accuracy").json()["by_source"]["text"]
+    assert (a["saved"], a["skipped"], a["rows_unchanged"], a["rows_corrected"]) == (3, 1, 1, 2)
+    assert a["fields_right_first_time"] == round(10 / 12, 3)
+    assert a["errors_flagged_rate"] == 0.5   # Vinod was flagged, Latha slipped through
+
+
+def test_summary_reports_overdue(monkeypatch):
+    main.ledger.add_transaction(customer_name="Joseph", tx_type="credit_sale", amount=2400, tx_date="2026-01-05")
+    main.ledger.add_transaction(customer_name="Ravi", tx_type="credit_sale", amount=100, tx_date=main.today().isoformat())
+    s = client.get("/api/summary").json()
+    assert s["overdue"]["count"] == 1 and s["overdue"]["total"] == 2400
+    cid = client.get("/api/customers").json()[0]["id"]
+    assert client.patch(f"/api/customers/{cid}", json={"overdue_days": 400}).status_code == 422

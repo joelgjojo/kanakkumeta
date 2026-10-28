@@ -293,3 +293,90 @@ def test_voice_entries_default_to_today(L):
     p = check_entry(entry(customer_name="Rajan", transaction_type="credit_sale", amount=350),
                     index=0, ledger=L, today=TODAY, source_type="voice")
     assert p.transaction_date == "2026-10-27" and p.status == "ready"
+
+
+# ---------- overdue ----------
+
+def test_overdue_counts_from_when_the_debt_started(L):
+    from app import reminders
+    # Settled up long ago, took credit yesterday: NOT overdue.
+    L.add_transaction(customer_name="Mary", tx_type="credit_sale", amount=100, tx_date="2026-08-01")
+    L.add_transaction(customer_name="Mary", tx_type="repayment", amount=100, tx_date="2026-08-10")
+    L.add_transaction(customer_name="Mary", tx_type="credit_sale", amount=50, tx_date="2026-10-26")
+    # Owes since August, paid a little in September, nothing since: overdue (47 days without payment).
+    L.add_transaction(customer_name="Joseph", tx_type="credit_sale", amount=2400, tx_date="2026-08-20")
+    L.add_transaction(customer_name="Joseph", tx_type="repayment", amount=400, tx_date="2026-09-10")
+    # Big balance but recent: not overdue, listed after the overdue one.
+    L.add_transaction(customer_name="Ravi", tx_type="credit_sale", amount=5000, tx_date="2026-10-20")
+    due = {d["name"]: d for d in reminders.due(L, "2026-10-27")}
+    assert not due["Mary"]["overdue"] and due["Mary"]["days_without_payment"] == 1
+    assert due["Joseph"]["overdue"] and due["Joseph"]["days_without_payment"] == 47
+    assert not due["Ravi"]["overdue"]
+    assert [d["name"] for d in reminders.due(L, "2026-10-27")] == ["Joseph", "Ravi", "Mary"]
+
+
+def test_customer_payment_cycle_overrides_shop_default(L):
+    from app import reminders
+    L.add_transaction(customer_name="Anil", tx_type="credit_sale", amount=300, tx_date="2026-10-17")
+    assert not reminders.due(L, "2026-10-27")[0]["overdue"]          # 10 days < 30
+    L.update_customer(cid(L, "Anil"), overdue_days=7)                  # pays weekly
+    d = reminders.due(L, "2026-10-27")[0]
+    assert d["overdue"] and d["overdue_limit"] == 7
+    L.update_customer(cid(L, "Anil"), overdue_days=0)                  # back to shop default
+    assert reminders.due(L, "2026-10-27")[0]["overdue_limit"] == 30
+
+
+# ---------- page total ----------
+
+def _page(L, *amounts, total=None):
+    from app.validation import check_page_total
+    ps = check_all([entry(customer_name=f"C{i}", transaction_type=t, amount=a, transaction_date="2026-10-25")
+                    for i, (t, a) in enumerate(amounts)], ledger=L, today=TODAY, source_type="image")
+    return ps, check_page_total(ps, total)
+
+
+def test_page_total_matches_any_way_shopkeepers_total(L):
+    ps, r = _page(L, ("credit_sale", 350), ("credit_sale", 120), ("repayment", 200), total=470)
+    assert r["status"] == "match" and r["basis"] == "credit rows"
+    assert all(Flag.page_total_mismatch not in p.flags for p in ps)
+    assert _page(L, ("credit_sale", 350), ("repayment", 200), total=550)[1]["basis"] == "all rows"
+    assert _page(L, ("credit_sale", 350), ("repayment", 200), total=150)[1]["basis"] == "credit minus payments"
+    assert _page(L, ("credit_sale", 350))[1] is None  # no total written: nothing to check
+
+
+def test_page_total_mismatch_puts_every_row_under_review(L):
+    ps, r = _page(L, ("credit_sale", 350), ("credit_sale", 120), total=520)  # 120 was really 170
+    assert r["status"] == "mismatch" and r["rows_sum"] == 470
+    assert all(Flag.page_total_mismatch in p.flags and p.status == "needs_review" for p in ps)
+    assert need(L, name="C0", tx_type=TxType.credit_sale, amount=350,
+                original_flags=["page_total_mismatch"]) == {Flag.page_total_mismatch}
+
+
+def test_page_total_not_checked_while_rows_are_incomplete(L):
+    from app.validation import check_page_total
+    ps = check_all([entry(customer_name="A", transaction_type="credit_sale", amount=350, transaction_date="2026-10-25"),
+                    entry(customer_name="B", amount=120, transaction_date="2026-10-25")],
+                   ledger=L, today=TODAY, source_type="image")
+    assert check_page_total(ps, 470)["status"] == "incomplete"
+
+
+def test_photo_prompt_lists_known_customers(monkeypatch):
+    from app import extractor
+    seen = {}
+    monkeypatch.setattr(extractor, "_call", lambda messages, key, effort, schema=None: seen.update(
+        text=messages[1]["content"][0]["text"], schema=schema))
+    extractor.extract_image(b"x", "image/jpeg", "2026-10-27", known_names=["Rajan", "Suresh"])
+    assert "Rajan, Suresh" in seen["text"] and "written_total" in seen["schema"]["required"]
+    extractor.extract_image(b"x", "image/jpeg", "2026-10-27")
+    assert "already in this shop" not in seen["text"]
+
+
+def test_old_database_gets_overdue_column(tmp_path):
+    import sqlite3
+    db = tmp_path / "v2.db"
+    con = sqlite3.connect(db)
+    con.executescript("CREATE TABLE customers (id TEXT PRIMARY KEY, key TEXT NOT NULL, display_name TEXT NOT NULL,"
+                      " label TEXT, phone TEXT, created_at TEXT NOT NULL);"
+                      "INSERT INTO customers VALUES ('c_1', 'rajan', 'Rajan', NULL, NULL, '2026-10-27');")
+    con.close()
+    assert Ledger(db).customers()[0]["overdue_days"] is None

@@ -58,11 +58,20 @@ Open http://localhost:8000 on a phone or laptop:
 - Questions like *"Rajan ethra tharanam?"* are answered from the ledger, not by the model.
 - **Same name, different people:** if two customers are called Rajan, the card asks *"Which Rajan?"* and won't
   save until you pick. Opening a second Rajan account needs a note to tell them apart ("auto driver").
-- **Pattu to collect** lists everyone who owes money, when they last paid, and when they were last reminded.
+- **Overdue:** anyone who owes money and hasn't paid for 30 days (or their own cycle, e.g. weekly) is flagged in red,
+  and the app opens with "2 customers are overdue · ₹2,500".
+- **Page total check:** if the page has a written total, the AI copies it (never calculates it) and code compares it
+  with the rows. A mismatch means a misread row, so every row on that page needs a check.
+- **Accuracy panel:** "96% of fields right first time", measured from the shopkeeper's own corrections.
+- **Pattu to collect** lists everyone who owes money, overdue first, with when they last paid and were last reminded.
   **Remind on WhatsApp** opens a Malayalam + English message in your own WhatsApp; reminding the same person again
   within 3 days asks first.
 - Tap a customer for their history with running balance, to add a WhatsApp number or note, or to **undo** an entry
   (undo appends a reversal; nothing is deleted).
+
+**Sample pages** in [`samples/`](samples/) (generated, fictional names): `page-no-total.png` (Latha's row has no
+direction, so the app asks), `page-total-matches.jpg` (written total ₹1,420, matches), `page-total-wrong.jpg` (written
+₹1,470, so every row goes to review).
 
 ## API
 
@@ -74,11 +83,12 @@ Open http://localhost:8000 on a phone or laptop:
 | POST | `/api/proposals/{id}/confirm` | final values + `acknowledged` flags (+ `customer_id`, or `new_customer` + `customer_label`) → saved transaction + new balance. 409 if a warning wasn't acknowledged or the name fits several customers |
 | POST | `/api/proposals/{id}/skip` | discard one entry |
 | GET | `/api/customers`, `/api/customers/{id}` | balances, history with running balance |
-| PATCH | `/api/customers/{id}` | `label` / `phone` only. Money can't be edited. |
-| GET | `/api/reminders` | everyone who owes, last payment, last reminder, ready WhatsApp link |
+| PATCH | `/api/customers/{id}` | `label`, `phone`, `overdue_days` only. Money can't be edited. |
+| GET | `/api/reminders` | everyone who owes (overdue first), last payment, last reminder, ready WhatsApp link |
 | POST | `/api/customers/{id}/remind` | log a reminder → message + WhatsApp link. 409 if reminded in the last 3 days, unless `recent_reminder` is acknowledged |
 | POST | `/api/transactions/{id}/reverse` | undo by appending a reversal |
-| GET | `/api/summary?day=` | credit given / repaid today, total outstanding |
+| GET | `/api/summary?day=` | credit given / repaid today, total outstanding, overdue count and total |
+| GET | `/api/accuracy?days=30` | AI accuracy for this shop, from the shopkeeper's corrections, per input type |
 | GET | `/api/sources/{ref}` | the original photo or voice note, for evidence view |
 
 ## Flags
@@ -86,7 +96,7 @@ Open http://localhost:8000 on a phone or laptop:
 Hard (field must be filled before saving): `unclear_direction`, `missing_customer`, `missing_amount`,
 `invalid_amount`, `illegible`, `missing_date`, `invalid_date`, `ambiguous_customer`.
 Soft (must be acknowledged): `uncertain_amount`, `amount_from_balance`, `possible_duplicate`,
-`similar_customer`, `overpayment`, `same_name_customer`. Info: `new_customer`.
+`similar_customer`, `overpayment`, `same_name_customer`, `page_total_mismatch`. Info: `new_customer`.
 
 ## Evaluation
 
@@ -115,13 +125,14 @@ backend/
     extractor.py    Muse Spark (structured output) + Muse Voice Transcribe, on-disk cache, cost logging
     validation.py   deterministic flags; re-checks final values and resolves "which customer" at confirm time
     ledger.py       SQLite, integer paise, append-only, reversals; customers by id (same names allowed)
-    reminders.py    WhatsApp reminder text + link, 3-day repeat guard
+    reminders.py    overdue rule, WhatsApp reminder text + link, 3-day repeat guard
+    accuracy.py     AI accuracy measured from the shopkeeper's corrections
     pipeline.py     model output -> checks -> stored proposal
     main.py         FastAPI routes + serves static/index.html
     static/         the shopkeeper's review UI (single file, no build)
   eval/             labeled test set + scorer
   scripts/          ping.py, try_image.py
-  tests/            38 tests, no API key needed
+  tests/            47 tests, no API key needed
 ```
 
 All names and amounts in this repo are fictional.

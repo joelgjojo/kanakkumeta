@@ -36,6 +36,7 @@ class Flag(str, Enum):
     invalid_date = "invalid_date"
     ambiguous_customer = "ambiguous_customer"    # 2+ customers share this name: pick one
     same_name_customer = "same_name_customer"    # creating a second account with an existing name
+    page_total_mismatch = "page_total_mismatch"  # rows don't add up to the total written on the page
 
 
 MODEL_FLAGS = [
@@ -51,7 +52,7 @@ HARD_FLAGS = {
 # Soft flags = values exist but a human must explicitly acknowledge them.
 SOFT_FLAGS = {
     Flag.uncertain_amount, Flag.amount_from_balance, Flag.possible_duplicate,
-    Flag.similar_customer, Flag.overpayment, Flag.same_name_customer,
+    Flag.similar_customer, Flag.overpayment, Flag.same_name_customer, Flag.page_total_mismatch,
 }
 # Info flags = shown, never block.
 INFO_FLAGS = {Flag.new_customer}
@@ -75,6 +76,8 @@ class ModelOutput(BaseModel):
     entries: list[ModelEntry] = Field(default_factory=list)
     query_customer: Optional[str] = None
     note: Optional[str] = None
+    written_total: Optional[float] = None      # photos only: the total the shopkeeper wrote, never computed
+    written_total_text: Optional[str] = None
 
 
 class ProposedEntry(BaseModel):
@@ -106,6 +109,7 @@ class ExtractionResult(BaseModel):
     note: Optional[str]
     entries: list[ProposedEntry]
     balance_answer: Optional[dict] = None
+    page_total: Optional[dict] = None          # photos: written total vs the rows, checked in code
     model: str
     cached: bool
     usage: Optional[dict] = None
@@ -134,6 +138,7 @@ class SkipRequest(BaseModel):
 class CustomerUpdate(BaseModel):
     label: Optional[str] = Field(default=None, max_length=60)
     phone: Optional[str] = Field(default=None, max_length=20)
+    overdue_days: Optional[int] = Field(default=None, ge=0, le=365)  # 0 = use the shop default
 
 
 class RemindRequest(BaseModel):

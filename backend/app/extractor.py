@@ -19,7 +19,8 @@ from typing import Optional
 from pydantic import ValidationError
 
 from .config import settings
-from .prompts import RESPONSE_SCHEMA, SYSTEM_PROMPT, USER_IMAGE_TEMPLATE, USER_TEXT_TEMPLATE, USER_VOICE_TEMPLATE
+from .prompts import (IMAGE_RESPONSE_SCHEMA, KNOWN_CUSTOMERS_LINE, RESPONSE_SCHEMA, SYSTEM_PROMPT,
+                      USER_IMAGE_TEMPLATE, USER_TEXT_TEMPLATE, USER_VOICE_TEMPLATE)
 from .schemas import ModelOutput
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
@@ -58,7 +59,7 @@ def _cost(usage: Optional[dict]) -> Optional[float]:
                  + usage.get("completion_tokens", 0) / 1e6 * settings.price_out, 6)
 
 
-def _call(messages: list[dict], cache_key: str, effort: str) -> Extraction:
+def _call(messages: list[dict], cache_key: str, effort: str, schema: dict = RESPONSE_SCHEMA) -> Extraction:
     if effort:
         cache_key = f"effort={effort}|{cache_key}"
     path = _cache_path(cache_key)
@@ -71,7 +72,7 @@ def _call(messages: list[dict], cache_key: str, effort: str) -> Extraction:
         model=settings.model,
         messages=messages,
         response_format={"type": "json_schema",
-                         "json_schema": {"name": "kanakku_entries", "schema": RESPONSE_SCHEMA}},
+                         "json_schema": {"name": "kanakku_entries", "schema": schema}},
     )
     if effort:
         kwargs["reasoning_effort"] = effort
@@ -164,10 +165,13 @@ def transcribe(wav: bytes, keywords: list[str]) -> dict:
     return {**out, "cached": False}
 
 
-def extract_image(image_bytes: bytes, mime: str, today: str, hint: str = "") -> Extraction:
+def extract_image(image_bytes: bytes, mime: str, today: str, hint: str = "",
+                  known_names: Optional[list[str]] = None) -> Extraction:
     if mime not in ALLOWED_IMAGE_TYPES:
         raise ExtractionError(f"Unsupported image type {mime}. Use JPEG, PNG or WebP.")
-    user = USER_IMAGE_TEMPLATE.format(today=today, hint=f"Shopkeeper's note: {hint}" if hint else "")
+    # Names are the hardest thing to read in handwriting; the shop's own customer list is the best hint.
+    known = KNOWN_CUSTOMERS_LINE.format(names=", ".join(known_names[:200])) if known_names else ""
+    user = USER_IMAGE_TEMPLATE.format(today=today, known=known, hint=f"Shopkeeper's note: {hint}" if hint else "")
     b64 = base64.b64encode(image_bytes).decode()
     messages = [
         {"role": "developer", "content": SYSTEM_PROMPT},
@@ -177,7 +181,8 @@ def extract_image(image_bytes: bytes, mime: str, today: str, hint: str = "") -> 
         ]},
     ]
     img_hash = hashlib.sha256(image_bytes).hexdigest()
-    return _call(messages, f"{settings.model}|{SYSTEM_PROMPT}|{user}|img:{img_hash}", settings.image_reasoning_effort)
+    return _call(messages, f"{settings.model}|{SYSTEM_PROMPT}|{user}|img:{img_hash}", settings.image_reasoning_effort,
+                 IMAGE_RESPONSE_SCHEMA)
 
 
 def guess_mime(path: str) -> str:

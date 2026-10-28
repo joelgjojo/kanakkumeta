@@ -73,8 +73,15 @@ Transcript:
 
 USER_IMAGE_TEMPLATE = """Today's date: {today}
 Input type: photo of a handwritten account-book page.
-Read every row. One entry per transaction row. Skip headers and totals rows (do not add up totals yourself).
-{hint}"""
+Read every row. One entry per transaction row. Skip headers and totals rows: never make an entry for a total.
+WRITTEN TOTAL: if the shopkeeper wrote a total for these rows (e.g. "Total 1,520", or a sum under a line), copy it
+into written_total as a number and written_total_text exactly as written. NEVER add up the rows yourself: the app
+does that and compares, to catch misread rows. No written total -> both null.
+{known}{hint}"""
+
+KNOWN_CUSTOMERS_LINE = """Customers already in this shop's ledger. When the handwriting fits one of these, use that exact
+spelling; a name that is not in the list is still allowed: {names}
+"""
 
 
 _FLAG_ENUM = ["unclear_direction", "missing_customer", "missing_amount", "uncertain_amount", "illegible", "missing_date"]
@@ -109,4 +116,13 @@ RESPONSE_SCHEMA = {
         "note": {"type": ["string", "null"]},
     },
     "required": ["intent", "entries", "query_customer", "note"],
+}
+
+# Photos also report the total written on the page, so code can check the rows against it.
+IMAGE_RESPONSE_SCHEMA = {
+    **RESPONSE_SCHEMA,
+    "properties": {**RESPONSE_SCHEMA["properties"],
+                   "written_total": {"type": ["number", "null"]},
+                   "written_total_text": {"type": ["string", "null"]}},
+    "required": RESPONSE_SCHEMA["required"] + ["written_total", "written_total_text"],
 }

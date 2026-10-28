@@ -66,7 +66,12 @@ def _ago(iso: Optional[str], now: datetime) -> Optional[int]:
 
 
 def due(ledger: Ledger, today_iso: str) -> list[dict]:
-    """Everyone who owes money, most owed first, with when they last paid and were last reminded."""
+    """Everyone who owes money: overdue first (longest without paying), then by amount.
+
+    Overdue = owes money and hasn't paid anything for `overdue_days`, counted from the later of the last
+    payment and the day the current debt started. Someone who settled up 60 days ago and took credit
+    yesterday is not overdue.
+    """
     now = datetime.now(timezone.utc)
     today = datetime.fromisoformat(today_iso).date()
     out = []
@@ -77,8 +82,15 @@ def due(ledger: Ledger, today_iso: str) -> list[dict]:
         last = ledger.last_reminder(c["id"])
         text = message(c["name"], c["balance"])
         days_since = lambda d: (today - datetime.fromisoformat(d).date()).days if d else None  # noqa: E731
+        since = ledger.owing_since(c["id"])
+        unpaid_for = days_since(max(filter(None, (since, dates["last_payment"])), default=None))
+        limit = c["overdue_days"] or settings.overdue_days
         out.append({
             **c,
+            "owing_since": since,
+            "days_without_payment": unpaid_for,
+            "overdue_limit": limit,
+            "overdue": unpaid_for is not None and unpaid_for >= limit,
             "days_since_payment": days_since(dates["last_payment"]),
             "days_since_credit": days_since(dates["last_credit"]),
             "last_reminded_at": last["created_at"] if last else None,
@@ -87,4 +99,5 @@ def due(ledger: Ledger, today_iso: str) -> list[dict]:
             "message": text,
             "whatsapp_url": whatsapp_url(c["phone"], text),
         })
-    return sorted(out, key=lambda r: -r["balance"])
+    return sorted(out, key=lambda r: (not r["overdue"], -(r["days_without_payment"] or 0) if r["overdue"] else 0,
+                                      -r["balance"]))

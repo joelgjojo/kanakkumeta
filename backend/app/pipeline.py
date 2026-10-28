@@ -8,7 +8,7 @@ from typing import Optional
 from .extractor import Extraction
 from .ledger import Ledger
 from .schemas import ExtractionResult
-from .validation import check_all
+from .validation import check_all, check_page_total
 
 
 def build_proposal(ext: Extraction, *, ledger: Ledger, today: date, source_type: str,
@@ -16,6 +16,8 @@ def build_proposal(ext: Extraction, *, ledger: Ledger, today: date, source_type:
     out = ext.output
     entries = check_all(out.entries, ledger=ledger, today=today, source_type=source_type) \
         if out.intent == "transactions" else []
+
+    page_total = check_page_total(entries, out.written_total) if source_type == "image" else None
 
     balance_answer = None
     if out.intent == "balance_query" and out.query_customer:
@@ -37,6 +39,6 @@ def build_proposal(ext: Extraction, *, ledger: Ledger, today: date, source_type:
                          proposed=[e.model_dump(mode="json") for e in entries])
     return ExtractionResult(
         proposal_id=pid, source_type=source_type, source_ref=source_ref, raw_input=raw_input,
-        intent=out.intent, note=out.note, entries=entries, balance_answer=balance_answer,
+        intent=out.intent, note=out.note, entries=entries, balance_answer=balance_answer, page_total=page_total,
         model=ext.model, cached=ext.cached, usage=ext.usage,
     )

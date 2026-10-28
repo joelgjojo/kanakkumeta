@@ -112,6 +112,16 @@
   .due .row button { flex: 1 1 auto; }
   .tag { display: inline-block; font-size: .72rem; font-weight: 600; padding: 1px 7px; border-radius: 99px;
          background: var(--warn-bg); color: var(--warn); }
+  .tag.late { background: var(--hard-bg); color: var(--hard); }
+  .due.late { border-color: var(--hard); }
+  .alert { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px;
+           background: var(--hard-bg); color: var(--hard); border-radius: 10px; padding: 10px 12px; font-weight: 600; }
+  .alert a { color: inherit; white-space: nowrap; }
+  .note.ok { background: var(--info-bg); color: var(--repay); }
+  .note.bad { background: var(--hard-bg); color: var(--hard); }
+  .acc { display: grid; gap: 10px; }
+  .acc-row b { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+  .acc-row .muted { display: block; }
   table { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
   td, th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
   th { color: var(--muted); font-weight: 500; font-size: .75rem; }
@@ -135,6 +145,7 @@
     <div class="stat"><b id="s-repaid">–</b><span>Repaid today</span></div>
     <div class="stat"><b id="s-out">–</b><span>Total outstanding</span></div>
   </div>
+  <div class="alert" id="overdue-alert" hidden><span id="overdue-text"></span><a href="#due-title">View →</a></div>
 
   <h2>Add entries</h2>
   <div class="card">
@@ -171,11 +182,12 @@
   <section id="proposal" hidden>
     <h2 id="proposal-title">Check before saving</h2>
     <div id="proposal-note" class="note" hidden></div>
+    <div id="page-total" class="note" hidden></div>
     <div id="photo-view" class="photo" hidden></div>
     <div id="entries"></div>
   </section>
 
-  <h2>Pattu to collect <span class="muted" id="due-count"></span></h2>
+  <h2 id="due-title">Pattu to collect <span class="muted" id="due-count"></span></h2>
   <div id="due" class="list"><span class="muted">Nobody owes anything.</span></div>
 
   <h2>Customers</h2>
@@ -187,17 +199,24 @@
       <div class="newfields" style="margin-bottom:10px">
         <label class="muted">Note (to tell apart same names)<input id="h-label" maxlength="60" placeholder="e.g. auto driver"></label>
         <label class="muted">WhatsApp number<input id="h-phone" inputmode="tel" maxlength="20" placeholder="98470 12345"></label>
+        <label class="muted wide" style="grid-column:1/-1">Overdue if nothing paid for (days)<input id="h-cycle" type="number" inputmode="numeric" min="1" max="365"></label>
       </div>
       <div class="row"><span class="muted grow" id="h-msg"></span><button type="button" id="h-save">Save details</button></div>
       <table style="margin-top:10px"><thead><tr><th>Date</th><th>Entry</th><th class="r">Amount</th><th class="r">Balance</th><th></th></tr></thead>
         <tbody id="history-body"></tbody></table>
     </div>
   </section>
+
+  <section id="accuracy" hidden>
+    <h2>How accurate is the AI for this shop? <span class="muted">· last 30 days</span></h2>
+    <div class="card acc" id="accuracy-body"></div>
+    <p class="muted">Measured from your own corrections: every field you changed before saving counts as an AI mistake.</p>
+  </section>
 </main>
 
 <script>
 const HARD = new Set(["unclear_direction", "missing_customer", "missing_amount", "invalid_amount", "illegible", "missing_date", "invalid_date", "ambiguous_customer"]);
-const SOFT = new Set(["uncertain_amount", "amount_from_balance", "possible_duplicate", "similar_customer", "overpayment", "same_name_customer"]);
+const SOFT = new Set(["uncertain_amount", "amount_from_balance", "possible_duplicate", "similar_customer", "overpayment", "same_name_customer", "page_total_mismatch"]);
 const FIELD_OF = { unclear_direction: "type", missing_customer: "name", missing_amount: "amount", invalid_amount: "amount",
                    uncertain_amount: "amount", missing_date: "date", invalid_date: "date", ambiguous_customer: "who" };
 let FLAG_TEXT = {};
@@ -256,7 +275,11 @@ async function refresh() {
     $("#s-credit").textContent = rupees(s.credit_given.total);
     $("#s-repaid").textContent = rupees(s.repayments.total);
     $("#s-out").textContent = rupees(s.total_outstanding);
+    shopOverdueDays = s.overdue.default_days;
+    $("#overdue-alert").hidden = !s.overdue.count;
+    $("#overdue-text").textContent = `${s.overdue.count} ${s.overdue.count === 1 ? "customer is" : "customers are"} overdue · ${rupees(s.overdue.total)}`;
   } catch { /* leave old numbers */ }
+  loadAccuracy();
   try {
     const cs = await api("/api/customers");
     const box = $("#customers");
@@ -272,11 +295,13 @@ async function loadDue() {
   let due;
   try { due = await api("/api/reminders"); } catch { return; }
   $("#due-count").textContent = due.length ? `· ${due.length} ${due.length === 1 ? "person" : "people"}` : "";
-  $("#due").innerHTML = due.length ? due.map(d => `<div class="card due" data-cid="${d.id}">
+  $("#due").innerHTML = due.length ? due.map(d => `<div class="card due ${d.overdue ? "late" : ""}" data-cid="${d.id}">
       <div class="due-top"><span>${who(d)}</span><span class="amt owes">${rupees(d.balance)}</span></div>
       <small>${d.days_since_payment == null ? "Never paid back" : "Last paid " + days(d.days_since_payment)}
         · last credit ${days(d.days_since_credit)}${d.phone ? "" : " · no WhatsApp number"}</small>
-      ${d.recently_reminded ? `<span><span class="tag">Reminded ${days(d.days_since_reminder)}</span></span>` : ""}
+      ${d.overdue || d.recently_reminded ? `<span>
+        ${d.overdue ? `<span class="tag late">Overdue · nothing paid for ${d.days_without_payment} days</span>` : ""}
+        ${d.recently_reminded ? `<span class="tag">Reminded ${days(d.days_since_reminder)}</span>` : ""}</span>` : ""}
       <div class="row">
         <button type="button" class="wa" data-remind="${d.id}">Remind on WhatsApp</button>
         <button type="button" data-copy="${d.id}">Copy message</button>
@@ -319,6 +344,21 @@ $("#customers").addEventListener("click", e => {
 });
 
 let historyId = null;
+let shopOverdueDays = 30;
+
+const SOURCE_NAME = { image: "Photos of the book", voice: "Voice notes", text: "Typed messages" };
+const pct = r => r == null ? "–" : Math.round(r * 100) + "%";
+async function loadAccuracy() {
+  let a;
+  try { a = await api("/api/accuracy"); } catch { return; }
+  const rows = Object.entries(a.by_source).filter(([, s]) => s.saved);
+  $("#accuracy").hidden = !rows.length;
+  $("#accuracy-body").innerHTML = rows.map(([src, s]) => `<div class="acc-row">
+      <b>${pct(s.fields_right_first_time)}</b> <span>of fields right first time · ${esc(SOURCE_NAME[src] || src)}</span>
+      <span class="muted">${s.saved} saved, ${s.rows_corrected} corrected${s.rows_corrected
+        ? ` · ${s.corrected_flagged} of ${s.rows_corrected} mistakes were flagged by the app first (${pct(s.errors_flagged_rate)})` : ""}${s.skipped ? ` · ${s.skipped} skipped` : ""}</span>
+    </div>`).join("");
+}
 async function showHistory(cid) {
   const c = await api(`/api/customers/${cid}`);
   historyId = cid;
@@ -326,6 +366,8 @@ async function showHistory(cid) {
   $("#history-title").innerHTML = `${who(c)} — ${owesText(c.balance)}`;
   $("#h-label").value = c.label || "";
   $("#h-phone").value = c.phone ? c.phone.replace(/^91/, "") : "";
+  $("#h-cycle").value = c.overdue_days || "";
+  $("#h-cycle").placeholder = `shop default: ${shopOverdueDays}`;
   $("#h-msg").textContent = c.last_reminder ? `Last reminded ${shortDate(c.last_reminder.created_at.slice(0, 10))}` : "";
   const label = { credit_sale: "Credit", repayment: "Paid", reversal: "Undo" };
   $("#history-body").innerHTML = c.history.map(t => `<tr class="${t.reversed ? "struck" : ""}">
@@ -340,7 +382,8 @@ async function showHistory(cid) {
 
 $("#h-save").addEventListener("click", async () => {
   try {
-    await sendJSON("PATCH", `/api/customers/${historyId}`, { label: $("#h-label").value, phone: $("#h-phone").value });
+    await sendJSON("PATCH", `/api/customers/${historyId}`, { label: $("#h-label").value, phone: $("#h-phone").value,
+                                                             overdue_days: parseInt($("#h-cycle").value) || 0 });
     await refresh(); await showHistory(historyId);
     $("#h-msg").textContent = "Saved.";
   } catch (err) { $("#h-msg").textContent = err.message; }
@@ -469,6 +512,16 @@ function renderProposal(p) {
   }
   if (p.source_type === "voice") noteText = `Heard: “${p.raw_input}”` + (noteText ? "\n" + noteText : "");
   note.textContent = noteText; note.hidden = !noteText; note.style.whiteSpace = "pre-line";
+
+  const pt = $("#page-total"), t = p.page_total;
+  pt.hidden = !t;
+  if (t) {
+    pt.className = "note " + (t.status === "match" ? "ok" : t.status === "mismatch" ? "bad" : "");
+    pt.textContent = t.status === "match" ? `✓ Page total ${rupees(t.written)} matches the rows (${t.basis}).`
+      : t.status === "mismatch" ? `⚠ The page says ${rupees(t.written)}, but the rows read add up to ${rupees(t.rows_sum)}` +
+          (t.credit_sum !== t.rows_sum ? ` (credit only: ${rupees(t.credit_sum)})` : "") + ". A row may be misread: check each amount against the photo."
+      : `Page total ${rupees(t.written)} written. ${t.message}`;
+  }
 
   $("#proposal-title").textContent = p.entries.length
     ? `Check before saving (${p.entries.length} ${p.entries.length === 1 ? "entry" : "entries"})` : "Result";

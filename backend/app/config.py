@@ -27,6 +27,9 @@ class Settings:
     price_out: float = float(os.getenv("PRICE_OUT_PER_M", "4.25"))
     asr_model: str = os.getenv("ASR_MODEL", "muse-voice-transcribe-1.0")
     asr_price_per_hour: float = float(os.getenv("ASR_PRICE_PER_HOUR", "0.18"))
+    # A customer who owes money and hasn't paid anything for this many days is overdue.
+    # Each customer can have their own cycle (e.g. pays monthly on salary day).
+    overdue_days: int = int(os.getenv("OVERDUE_DAYS", "30"))
     # Shown in WhatsApp reminders. Empty = "our shop".
     shop_name: str = os.getenv("SHOP_NAME", "")
     cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173")

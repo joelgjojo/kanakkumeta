@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import extractor, reminders
+from . import accuracy, extractor, reminders
 from .config import settings
 from .ledger import AmbiguousCustomer, Ledger
 from .pipeline import build_proposal
@@ -62,7 +62,8 @@ async def extract_image(file: UploadFile = File(...), hint: str = Form("")):
     UPLOADS.mkdir(parents=True, exist_ok=True)
     (UPLOADS / f"{ref}{ext_}").write_bytes(data)
     try:
-        ext = extractor.extract_image(data, mime, today().isoformat(), hint)
+        names = sorted({c["name"] for c in ledger.customers()})
+        ext = extractor.extract_image(data, mime, today().isoformat(), hint, names)
     except extractor.ExtractionError as e:
         raise HTTPException(502, detail=str(e))
     return build_proposal(ext, ledger=ledger, today=today(), source_type="image",
@@ -183,7 +184,7 @@ def update_customer(cid: str, body: CustomerUpdate):
             phone = reminders.normalize_phone(body.phone) or ""
         except ValueError as e:
             raise HTTPException(422, detail=str(e))
-    return ledger.update_customer(cid, label=body.label, phone=phone)
+    return ledger.update_customer(cid, label=body.label, phone=phone, overdue_days=body.overdue_days)
 
 
 @app.get("/api/reminders")
@@ -222,7 +223,16 @@ def reverse(tx_id: str, reason: str = ""):
 
 @app.get("/api/summary")
 def summary(day: Optional[str] = None):
-    return ledger.day_summary(day or today().isoformat())
+    out = ledger.day_summary(day or today().isoformat())
+    overdue = [r for r in reminders.due(ledger, today().isoformat()) if r["overdue"]]
+    out["overdue"] = {"count": len(overdue), "total": sum(r["balance"] for r in overdue),
+                      "default_days": settings.overdue_days}
+    return out
+
+
+@app.get("/api/accuracy")
+def accuracy_report(days: int = 30):
+    return accuracy.report(ledger, days)
 
 
 @app.get("/api/flags")

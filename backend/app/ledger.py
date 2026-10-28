@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS customers (
     display_name TEXT NOT NULL,
     label TEXT,                     -- what tells two Rajans apart: "auto driver", "near church"
     phone TEXT,                     -- digits with country code, for WhatsApp reminders
+    overdue_days INTEGER,           -- this customer's own payment cycle; NULL = the shop's default
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS customers_by_key ON customers(key);
@@ -124,13 +125,15 @@ class Ledger:
         cols = {r["name"] for r in self.db.execute("PRAGMA table_info(customers)")}
         if cols and "id" not in cols:
             self.db.executescript(MIGRATE_V1.format(schema=SCHEMA))
+        elif cols and "overdue_days" not in cols:
+            self.db.execute("ALTER TABLE customers ADD COLUMN overdue_days INTEGER")
         self.db.executescript(SCHEMA)
         self.db.commit()
 
     # ---------- customers ----------
     def _customer(self, r: sqlite3.Row) -> dict:
         return {"id": r["id"], "name": r["display_name"], "label": r["label"], "phone": r["phone"],
-                "balance": self.balance(r["id"])}
+                "overdue_days": r["overdue_days"], "balance": self.balance(r["id"])}
 
     def customers(self) -> list[dict]:
         rows = self.db.execute("SELECT * FROM customers ORDER BY display_name, label").fetchall()
@@ -158,12 +161,18 @@ class Ledger:
         self.db.commit()
         return cid
 
-    def update_customer(self, cid: str, *, label: Optional[str] = None, phone: Optional[str] = None) -> dict:
-        """Contact details only. Money fields can't be edited here or anywhere else."""
+    def update_customer(self, cid: str, *, label: Optional[str] = None, phone: Optional[str] = None,
+                        overdue_days: Optional[int] = None) -> dict:
+        """Contact details and payment cycle only. Money fields can't be edited here or anywhere else.
+
+        overdue_days: None = unchanged, 0 = back to the shop default.
+        """
         if label is not None:
             self.db.execute("UPDATE customers SET label = ? WHERE id = ?", (label.strip() or None, cid))
         if phone is not None:
             self.db.execute("UPDATE customers SET phone = ? WHERE id = ?", (phone or None, cid))
+        if overdue_days is not None:
+            self.db.execute("UPDATE customers SET overdue_days = ? WHERE id = ?", (overdue_days or None, cid))
         self.db.commit()
         return self.get_customer(cid)
 
@@ -187,6 +196,18 @@ class Ledger:
 
     def total_outstanding(self) -> float:
         return sum(c["balance"] for c in self.customers() if c["balance"] > 0)
+
+    def owing_since(self, cid: str) -> Optional[str]:
+        """Date the current debt started: when the running balance last went from settled to owing."""
+        since = None
+        for t in self.history(cid):
+            if t["type"] == "reversal" or t["reversed"]:
+                continue
+            if t["running_balance"] <= 0:
+                since = None
+            elif since is None:
+                since = t["date"]
+        return since
 
     def last_dates(self, cid: str) -> dict:
         rows = self.db.execute(
