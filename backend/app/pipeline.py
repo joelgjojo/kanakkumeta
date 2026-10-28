@@ -19,10 +19,17 @@ def build_proposal(ext: Extraction, *, ledger: Ledger, today: date, source_type:
 
     balance_answer = None
     if out.intent == "balance_query" and out.query_customer:
-        c = ledger.find_customer(out.query_customer)
+        matches = ledger.find_customers(out.query_customer)
         # The answer comes from SQL, not from the model.
-        balance_answer = {"customer": c["name"], "balance": ledger.balance(c["key"])} if c \
-            else {"customer": out.query_customer, "balance": None, "message": "No such customer in the ledger"}
+        if len(matches) == 1:
+            balance_answer = {"customer": matches[0]["name"], "balance": matches[0]["balance"]}
+        elif matches:
+            balance_answer = {"customer": out.query_customer, "balance": None,
+                              "message": f"{len(matches)} customers have this name",
+                              "matches": [{k: m[k] for k in ("id", "name", "label", "balance")} for m in matches]}
+        else:
+            balance_answer = {"customer": out.query_customer, "balance": None,
+                              "message": "No such customer in the ledger"}
 
     pid = "p_" + uuid.uuid4().hex[:12]
     ledger.save_proposal(pid=pid, source_type=source_type, source_ref=source_ref, raw_input=raw_input,

@@ -2,24 +2,31 @@
 
 **Turns a shopkeeper's handwritten credit book into a digital ledger — with AI that asks before it guesses.**
 
-Built for the Meta Global AI Developer Hackathon 2026 (Indie track, *Build for Your World*) on Muse Spark via Meta Model API.
+Built for the Meta Global AI Developer Hackathon 2026 (Indie track, *Build for Your World*) on Meta Model API:
+**Muse Spark** reads the book, **Muse Voice Transcribe** hears voice notes.
+
+**→ [Is it feasible? Costs, limits and real-world problems, measured](FEASIBILITY.md)**: about ₹0.23 per typed entry,
+25/25 on the eval, and what happens with two customers called Rajan.
 
 ## How it works
 
 ```
-photo / Manglish message
+photo / typed message / voice note ──► Muse Voice Transcribe (biased with the shop's customer names)
         │
         ▼
 Muse Spark (structured output)  ── interprets: name, credit vs repayment, amount, date,
         │                            evidence snippet, row bounding box, and FLAGS when unsure
         ▼
-Deterministic checks (Python)   ── negative/huge amounts, duplicates, similar names,
+Deterministic checks (Python)   ── negative/huge amounts, duplicates, same / similar names,
         │                            overpayment, "paid in full" amount from the ledger
         ▼
 Shopkeeper confirms / edits / skips   ── soft warnings must be explicitly acknowledged
         │
         ▼
 Append-only ledger (integer paise)    ── balances are always SUMs; no "set balance" exists
+        │
+        ▼
+WhatsApp reminders                    ── fixed template, amount from the ledger, no repeat within 3 days
 ```
 
 **The model never touches money.** It can only propose entries. Balances, duplicates and the "paid in full"
@@ -43,12 +50,19 @@ pytest -q                   # unit + API tests (no key needed)
 
 Open http://localhost:8000 on a phone or laptop:
 
-- **Type** a message (`Rajan 350 pattu, Suresh 200 thannu`) or **photograph** a page of the credit book.
+- **Speak** (`Rajan munnooru pattu`), **type** (`Rajan 350 pattu, Suresh 200 thannu`) or **photograph** a page
+  of the credit book. The mic needs `localhost` or https.
 - Each entry comes back as an editable card: *Looks right* or *Needs your check*. Fields the model couldn't
   determine are outlined; soft warnings have an **I checked this** box that must be ticked before **Save**.
 - On photos, every entry's row is boxed on the image so the shopkeeper can compare against the handwriting.
 - Questions like *"Rajan ethra tharanam?"* are answered from the ledger, not by the model.
-- Tap a customer for their history with running balance; **undo** appends a reversal (nothing is deleted).
+- **Same name, different people:** if two customers are called Rajan, the card asks *"Which Rajan?"* and won't
+  save until you pick. Opening a second Rajan account needs a note to tell them apart ("auto driver").
+- **Pattu to collect** lists everyone who owes money, when they last paid, and when they were last reminded.
+  **Remind on WhatsApp** opens a Malayalam + English message in your own WhatsApp; reminding the same person again
+  within 3 days asks first.
+- Tap a customer for their history with running balance, to add a WhatsApp number or note, or to **undo** an entry
+  (undo appends a reversal; nothing is deleted).
 
 ## API
 
@@ -56,19 +70,23 @@ Open http://localhost:8000 on a phone or laptop:
 |---|---|---|
 | POST | `/api/extract/text` | `{"text": "Rajan 350 pattu"}` → proposal (nothing saved) |
 | POST | `/api/extract/image` | multipart `file` (+ optional `hint`) → proposal with row boxes |
-| POST | `/api/proposals/{id}/confirm` | final values + `acknowledged` flags → saved transaction + new balance. 409 if a warning wasn't acknowledged |
+| POST | `/api/extract/voice` | multipart `file`: mono 16-bit WAV, 16/24 kHz (the UI converts in the browser) → transcript + proposal |
+| POST | `/api/proposals/{id}/confirm` | final values + `acknowledged` flags (+ `customer_id`, or `new_customer` + `customer_label`) → saved transaction + new balance. 409 if a warning wasn't acknowledged or the name fits several customers |
 | POST | `/api/proposals/{id}/skip` | discard one entry |
-| GET | `/api/customers`, `/api/customers/{name}` | balances, history with running balance |
+| GET | `/api/customers`, `/api/customers/{id}` | balances, history with running balance |
+| PATCH | `/api/customers/{id}` | `label` / `phone` only. Money can't be edited. |
+| GET | `/api/reminders` | everyone who owes, last payment, last reminder, ready WhatsApp link |
+| POST | `/api/customers/{id}/remind` | log a reminder → message + WhatsApp link. 409 if reminded in the last 3 days, unless `recent_reminder` is acknowledged |
 | POST | `/api/transactions/{id}/reverse` | undo by appending a reversal |
 | GET | `/api/summary?day=` | credit given / repaid today, total outstanding |
-| GET | `/api/sources/{ref}` | the original photo, for evidence view |
+| GET | `/api/sources/{ref}` | the original photo or voice note, for evidence view |
 
 ## Flags
 
 Hard (field must be filled before saving): `unclear_direction`, `missing_customer`, `missing_amount`,
-`invalid_amount`, `illegible`, `missing_date`, `invalid_date`.
+`invalid_amount`, `illegible`, `missing_date`, `invalid_date`, `ambiguous_customer`.
 Soft (must be acknowledged): `uncertain_amount`, `amount_from_balance`, `possible_duplicate`,
-`similar_customer`, `overpayment`. Info: `new_customer`.
+`similar_customer`, `overpayment`, `same_name_customer`. Info: `new_customer`.
 
 ## Evaluation
 
@@ -76,17 +94,16 @@ Soft (must be acknowledged): `uncertain_amount`, `amount_from_balance`, `possibl
 injection). `eval/run_eval.py` reports field accuracy, **safety rate** (ambiguous inputs sent to review) and
 **false-alarm rate** (clean inputs flagged). Results are reported as measured.
 
-Latest run (`muse-spark-1.3`, 2026-10-27, text inputs, default reasoning effort):
+Runs on `muse-spark-1.3`, text inputs, 2026-10-27/28:
 
-| Metric | Result |
-|---|---|
-| Cases passed | 25 / 25 |
-| Field accuracy (name, type, amount, date) | 1.00 |
-| Safety rate (ambiguous / injection inputs sent to review) | 1.00 |
-| False-alarm rate (clean inputs flagged) | 0.00 |
-| Cost of the full run | ≈ $0.13 |
+| Reasoning effort | Passed | Field accuracy | Safety rate | False alarms | Cost / entry | Median latency |
+|---|---|---|---|---|---|---|
+| API default | 25/25 | 1.00 | 1.00 | 0.00 | $0.0053 | 3.4 s |
+| `low` | 25/25 | 1.00 | 1.00 | 0.00 | $0.0035 | 2.3 s |
+| **`minimal`** (used for typed + voice) | **25/25** | **1.00** | **1.00** | **0.00** | **$0.0026** | **1.6 s** |
 
-Full per-case output: `backend/eval/results/`. Handwritten-photo accuracy is not part of this set; it is
+Full per-case output: `backend/eval/results/` (`20261027-190107` default, `20261028-065826` low,
+`20261028-065906` minimal). Handwritten-photo accuracy is not part of this set; it is
 checked by hand with `scripts/try_image.py` on real pages.
 
 ## Project layout
@@ -95,15 +112,16 @@ checked by hand with `scripts/try_image.py` on real pages.
 backend/
   app/
     prompts.py      system prompt + JSON schema the model must fill
-    extractor.py    Meta Model API call (structured output), on-disk response cache, cost logging
-    validation.py   deterministic flags; re-checks final values at confirm time
-    ledger.py       SQLite, integer paise, append-only, reversals instead of deletes
+    extractor.py    Muse Spark (structured output) + Muse Voice Transcribe, on-disk cache, cost logging
+    validation.py   deterministic flags; re-checks final values and resolves "which customer" at confirm time
+    ledger.py       SQLite, integer paise, append-only, reversals; customers by id (same names allowed)
+    reminders.py    WhatsApp reminder text + link, 3-day repeat guard
     pipeline.py     model output -> checks -> stored proposal
     main.py         FastAPI routes + serves static/index.html
     static/         the shopkeeper's review UI (single file, no build)
   eval/             labeled test set + scorer
   scripts/          ping.py, try_image.py
-  tests/            26 tests, no API key needed
+  tests/            38 tests, no API key needed
 ```
 
 All names and amounts in this repo are fictional.

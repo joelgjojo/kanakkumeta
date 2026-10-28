@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import difflib
 import re
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Optional
 
-from .ledger import Ledger, customer_key
+from .ledger import AmbiguousCustomer, Ledger, customer_key
 from .schemas import HARD_FLAGS, SOFT_FLAGS, Flag, ModelEntry, ProposedEntry, TxType
 
 MAX_AMOUNT = 10_000_000  # ₹1 crore: anything bigger in a kirana notebook is almost certainly a misread
@@ -28,6 +29,8 @@ MESSAGES = {
     Flag.new_customer: "New customer — will be added to the ledger.",
     Flag.overpayment: "This repayment is more than what the customer owes.",
     Flag.invalid_date: "That date doesn't look right.",
+    Flag.ambiguous_customer: "More than one customer has this name. Which one is it?",
+    Flag.same_name_customer: "A customer with this name already exists. This opens a second, separate account.",
 }
 
 
@@ -44,6 +47,12 @@ def _looks_negative(amount_text: Optional[str]) -> bool:
     return bool(amount_text) and bool(re.search(r"(^|\s)[-−–]\s*\d", amount_text))
 
 
+def _similar(ledger: Ledger, name: str) -> Optional[str]:
+    keys = ledger.customer_keys()
+    close = difflib.get_close_matches(customer_key(name), list(keys), n=1, cutoff=0.8)
+    return keys[close[0]] if close else None
+
+
 def check_entry(
     e: ModelEntry, *, index: int, ledger: Ledger, today: date, source_type: str,
     batch: list[ProposedEntry] | None = None,
@@ -52,25 +61,24 @@ def check_entry(
     name = (e.customer_name or "").strip() or None
     tx_type = e.transaction_type
     amount = e.amount
-    matched = similar = dup_of = None
+    matched = matched_id = similar = dup_of = None
     current_balance = None
+    candidates: list[dict] = []
 
     # --- customer ---
     if not name:
         flags.append(Flag.missing_customer)
     else:
-        existing = ledger.find_customer(name)
-        if existing:
-            matched = existing["name"]
-            current_balance = ledger.balance(existing["key"])
+        candidates = ledger.find_customers(name)
+        if len(candidates) == 1:
+            matched, matched_id = candidates[0]["name"], candidates[0]["id"]
+            current_balance = candidates[0]["balance"]
+        elif len(candidates) > 1:
+            # Never pick one of several Rajans by ourselves: a wrong pick puts debt on the wrong person.
+            flags.append(Flag.ambiguous_customer)
         else:
-            keys = ledger.customer_keys()
-            close = difflib.get_close_matches(customer_key(name), list(keys), n=1, cutoff=0.8)
-            if close:
-                similar = keys[close[0]]
-                flags.append(Flag.similar_customer)
-            else:
-                flags.append(Flag.new_customer)
+            similar = _similar(ledger, name)
+            flags.append(Flag.similar_customer if similar else Flag.new_customer)
 
     # --- direction ---
     if tx_type is None:
@@ -96,8 +104,8 @@ def check_entry(
     if e.transaction_date and d is None:
         flags.append(Flag.invalid_date)
     elif d is None:
-        if source_type == "text":
-            d = today  # typed messages default to today: that's how shopkeepers use it
+        if source_type in ("text", "voice"):
+            d = today  # typed or spoken messages default to today: that's how shopkeepers use it
         elif Flag.missing_date not in flags:
             flags.append(Flag.missing_date)
     if d is not None and (d > today or d < today - timedelta(days=366 * 3)):
@@ -108,7 +116,7 @@ def check_entry(
     if tx_type == TxType.repayment and amount and current_balance is not None and amount > current_balance + 0.001:
         flags.append(Flag.overpayment)
     if name and tx_type and amount and tx_date:
-        dups = ledger.find_duplicates(customer_key(name), tx_type.value, amount, tx_date)
+        dups = ledger.find_duplicates(matched_id, tx_type.value, amount, tx_date) if matched_id else []
         if dups:
             dup_of = dups[0]["id"]
             flags.append(Flag.possible_duplicate)
@@ -129,7 +137,8 @@ def check_entry(
         index=index, customer_name=name, transaction_type=tx_type, amount=amount, transaction_date=tx_date,
         description=e.description, evidence=e.evidence, box=e.box, flags=flags,
         flag_messages={f.value: MESSAGES[f] for f in flags},
-        matched_customer=matched, similar_to=similar, duplicate_of=dup_of, current_balance=current_balance,
+        matched_customer=matched, matched_customer_id=matched_id, candidates=candidates,
+        similar_to=similar, duplicate_of=dup_of, current_balance=current_balance,
         status="needs_review" if blocking else "ready",
     )
 
@@ -141,32 +150,52 @@ def check_all(entries: list[ModelEntry], *, ledger: Ledger, today: date, source_
     return out
 
 
-def soft_flags_for_confirm(
-    *, ledger: Ledger, name: str, tx_type: TxType, amount: float, tx_date: date, today: date,
-    original_flags: list[str],
-) -> set[Flag]:
-    """Re-run the checks on the FINAL values the user submitted. Returns soft flags that must be acknowledged.
+@dataclass
+class ConfirmPlan:
+    customer_id: Optional[str]      # None = create a new customer on save
+    need: set[Flag] = field(default_factory=set)
 
-    Raises ValueError for anything that can never be saved.
+
+def plan_confirm(
+    *, ledger: Ledger, name: str, customer_id: Optional[str], new_customer: bool, label: Optional[str],
+    tx_type: TxType, amount: float, tx_date: date, today: date, original_flags: list[str],
+) -> ConfirmPlan:
+    """Re-run the checks on the FINAL values the user submitted and decide which account it goes to.
+
+    Returns the soft flags that must be acknowledged. Raises ValueError for anything that can never be saved,
+    and AmbiguousCustomer when the name fits several customers and the user hasn't said which.
     """
     if amount <= 0 or amount > MAX_AMOUNT:
         raise ValueError("invalid amount")
     if tx_date > today:
         raise ValueError("date is in the future")
     need: set[Flag] = set()
-    key = customer_key(name)
-    existing = ledger.find_customer(name)
-    if not existing:
-        keys = ledger.customer_keys()
-        if difflib.get_close_matches(key, list(keys), n=1, cutoff=0.8):
+
+    if customer_id:
+        if not ledger.get_customer(customer_id):
+            raise ValueError("unknown customer")
+    else:
+        matches = ledger.find_customers(name)
+        if new_customer:
+            if matches:
+                if not (label or "").strip():
+                    raise ValueError("add a note (e.g. 'auto driver', 'near church') to tell the two apart")
+                need.add(Flag.same_name_customer)
+        elif len(matches) > 1:
+            raise AmbiguousCustomer(name, matches)
+        elif len(matches) == 1:
+            customer_id = matches[0]["id"]
+        elif _similar(ledger, name):
             need.add(Flag.similar_customer)
-    if ledger.find_duplicates(key, tx_type.value, amount, tx_date.isoformat()):
-        need.add(Flag.possible_duplicate)
-    # Same rule as check_entry: a new customer repaying is usually an old paper-book debt, not an overpayment.
-    if tx_type == TxType.repayment and existing and amount > ledger.balance(existing["key"]) + 0.001:
-        need.add(Flag.overpayment)
+
+    if customer_id:
+        if ledger.find_duplicates(customer_id, tx_type.value, amount, tx_date.isoformat()):
+            need.add(Flag.possible_duplicate)
+        # A new customer repaying is usually an old paper-book debt, so overpayment is only checked for known ones.
+        if tx_type == TxType.repayment and amount > ledger.balance(customer_id) + 0.001:
+            need.add(Flag.overpayment)
     # If the model was unsure about the amount, the human must say "yes, I checked it".
     for f in (Flag.uncertain_amount, Flag.amount_from_balance):
         if f.value in original_flags:
             need.add(f)
-    return need
+    return ConfirmPlan(customer_id=customer_id, need=need)

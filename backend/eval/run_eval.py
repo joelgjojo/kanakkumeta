@@ -151,7 +151,7 @@ def main():
     amb = [r for r in rows if r["kind"] in ("ambiguous", "intent")]
     clean = [r for r in rows if r["kind"] == "clean"]
     summary = {
-        "model": settings.model, "run_at": datetime.now().isoformat(timespec="seconds"), "cases": n,
+        "model": settings.model, "reasoning_effort": settings.reasoning_effort or "default", "run_at": datetime.now().isoformat(timespec="seconds"), "cases": n,
         "passed": passed, "field_accuracy": round(fh / ft, 3) if ft else None,
         "safety_rate": round(sum(r["safe"] for r in amb) / len(amb), 3) if amb else None,
         "false_alarm_rate": round(sum(r["false_alarm"] for r in clean) / len(clean), 3) if clean else None,

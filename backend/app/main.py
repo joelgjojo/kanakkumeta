@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -12,12 +12,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import extractor
+from . import extractor, reminders
 from .config import settings
-from .ledger import Ledger, customer_key
+from .ledger import AmbiguousCustomer, Ledger
 from .pipeline import build_proposal
-from .schemas import ConfirmRequest, ExtractionResult, Flag, SkipRequest
-from .validation import soft_flags_for_confirm
+from .schemas import ConfirmRequest, CustomerUpdate, ExtractionResult, Flag, RemindRequest, SkipRequest
+from .validation import plan_confirm
 
 app = FastAPI(title="Kanakku API", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.cors_origins.split(",")],
@@ -26,6 +26,7 @@ app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.co
 ledger = Ledger(settings.data_dir / "kanakku.db")
 UPLOADS = settings.data_dir / "uploads"
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_AUDIO_BYTES = 32 * 1024 * 1024
 
 
 def today() -> date:
@@ -68,6 +69,33 @@ async def extract_image(file: UploadFile = File(...), hint: str = Form("")):
                           source_ref=f"{ref}{ext_}", raw_input=hint or None)
 
 
+@app.post("/api/extract/voice", response_model=ExtractionResult)
+async def extract_voice(file: UploadFile = File(...)):
+    data = await file.read()
+    if len(data) > MAX_AUDIO_BYTES:
+        raise HTTPException(413, "Voice note too large (max 32 MB)")
+    try:
+        extractor.check_wav(data)
+    except extractor.ExtractionError as e:
+        raise HTTPException(422, detail=str(e))
+    ref = hashlib.sha256(data).hexdigest()[:16] + ".wav"
+    UPLOADS.mkdir(parents=True, exist_ok=True)
+    (UPLOADS / ref).write_bytes(data)
+    # The shop's own customer names are the words a general speech model is most likely to get wrong.
+    names = sorted({c["name"] for c in ledger.customers()})
+    try:
+        asr = extractor.transcribe(data, names)
+        if not asr["transcript"]:
+            raise HTTPException(422, "Couldn't hear anything. Try again, a little closer to the phone.")
+        ext = extractor.extract_voice_transcript(asr["transcript"], today().isoformat())
+    except extractor.ExtractionError as e:
+        raise HTTPException(502, detail=str(e))
+    res = build_proposal(ext, ledger=ledger, today=today(), source_type="voice", source_ref=ref,
+                         raw_input=asr["transcript"])
+    res.usage = {**(res.usage or {}), "asr": {k: asr[k] for k in ("duration_ms", "cost_usd", "cached")}}
+    return res
+
+
 @app.get("/api/sources/{ref}")
 def get_source(ref: str):
     path = (UPLOADS / ref).resolve()
@@ -96,24 +124,29 @@ def confirm(pid: str, body: ConfirmRequest):
         raise HTTPException(409, f"entry already {status}")
     original = p["proposed"][body.index]
     try:
-        need = soft_flags_for_confirm(
-            ledger=ledger, name=body.customer_name, tx_type=body.transaction_type, amount=body.amount,
+        phone = reminders.normalize_phone(body.customer_phone)
+        plan = plan_confirm(
+            ledger=ledger, name=body.customer_name, customer_id=body.customer_id, new_customer=body.new_customer,
+            label=body.customer_label, tx_type=body.transaction_type, amount=body.amount,
             tx_date=body.transaction_date, today=today(), original_flags=original["flags"])
+    except AmbiguousCustomer as e:
+        raise HTTPException(409, detail={"error": "customer_choice_required", "candidates": e.candidates})
     except ValueError as e:
         raise HTTPException(422, detail=str(e))
-    missing = need - set(body.acknowledged)
+    missing = plan.need - set(body.acknowledged)
     if missing:
         # Nothing is saved until the human has explicitly seen every warning.
         raise HTTPException(409, detail={"error": "acknowledgement_required",
                                          "flags": sorted(f.value for f in missing)})
+    cid = plan.customer_id or ledger.create_customer(body.customer_name, body.customer_label, phone)
     tx = ledger.add_transaction(
-        customer_name=body.customer_name, tx_type=body.transaction_type.value, amount=body.amount,
+        customer_id=cid, tx_type=body.transaction_type.value, amount=body.amount,
         tx_date=body.transaction_date.isoformat(), description=body.description, proposal_id=pid,
         entry_index=body.index, source_ref=p["source_ref"], acknowledged=[f.value for f in body.acknowledged])
     ledger.set_entry_status(pid, body.index, "confirmed")
-    key = customer_key(body.customer_name)
-    return {"transaction": tx, "customer": ledger.find_customer(body.customer_name)["name"],
-            "balance": ledger.balance(key)}
+    c = ledger.get_customer(cid)
+    return {"transaction": tx, "customer": c["name"], "customer_id": cid, "label": c["label"],
+            "balance": c["balance"]}
 
 
 @app.post("/api/proposals/{pid}/skip")
@@ -132,12 +165,49 @@ def customers():
     return ledger.customers()
 
 
-@app.get("/api/customers/{name}")
-def customer(name: str):
-    c = ledger.find_customer(name)
+@app.get("/api/customers/{cid}")
+def customer(cid: str):
+    c = ledger.get_customer(cid)
     if not c:
         raise HTTPException(404, "customer not found")
-    return {"name": c["name"], "balance": ledger.balance(c["key"]), "history": ledger.history(c["key"])}
+    return {**c, "history": ledger.history(cid), "last_reminder": ledger.last_reminder(cid)}
+
+
+@app.patch("/api/customers/{cid}")
+def update_customer(cid: str, body: CustomerUpdate):
+    if not ledger.get_customer(cid):
+        raise HTTPException(404, "customer not found")
+    phone = None  # None = leave unchanged, "" = remove
+    if body.phone is not None:
+        try:
+            phone = reminders.normalize_phone(body.phone) or ""
+        except ValueError as e:
+            raise HTTPException(422, detail=str(e))
+    return ledger.update_customer(cid, label=body.label, phone=phone)
+
+
+@app.get("/api/reminders")
+def reminder_list():
+    return reminders.due(ledger, today().isoformat())
+
+
+@app.post("/api/customers/{cid}/remind")
+def remind(cid: str, body: RemindRequest):
+    c = ledger.get_customer(cid)
+    if not c:
+        raise HTTPException(404, "customer not found")
+    if c["balance"] <= 0:
+        raise HTTPException(409, detail={"error": "nothing_owed"})
+    last = ledger.last_reminder(cid)
+    if last and "recent_reminder" not in body.acknowledged and \
+            datetime.now(timezone.utc) - datetime.fromisoformat(last["created_at"]) < reminders.MIN_GAP:
+        # Same customer, reminded a moment ago: ask before nagging them again.
+        raise HTTPException(409, detail={"error": "acknowledgement_required", "flags": ["recent_reminder"],
+                                         "last_reminded_at": last["created_at"]})
+    text = reminders.message(c["name"], c["balance"])
+    logged = ledger.log_reminder(cid, c["balance"], text)
+    return {"message": text, "whatsapp_url": reminders.whatsapp_url(c["phone"], text),
+            "reminded_at": logged["created_at"], "has_phone": bool(c["phone"])}
 
 
 @app.post("/api/transactions/{tx_id}/reverse")

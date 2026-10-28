@@ -10,12 +10,14 @@
     --bg: #f6f1e7; --paper: #fffdf8; --ink: #2b2520; --muted: #7a6f63; --line: #e3d9c8;
     --accent: #1f6f5c; --accent-ink: #fff; --credit: #b4462b; --repay: #1f6f5c;
     --warn-bg: #fff4d6; --warn: #8a5a00; --hard-bg: #fde8e4; --hard: #a3301b; --info-bg: #e8f0fb; --info: #2d5a8c;
+    --wa: #128c4a;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #1b1916; --paper: #24211d; --ink: #eee6da; --muted: #a59a8c; --line: #3a352e;
       --accent: #4fb396; --accent-ink: #10201b; --credit: #e98a6f; --repay: #4fb396;
       --warn-bg: #3a2f14; --warn: #f1c46a; --hard-bg: #40201a; --hard: #f39a85; --info-bg: #1d2a3a; --info: #9cc1ec;
+      --wa: #3fbf73;
     }
   }
   * { box-sizing: border-box; }
@@ -26,6 +28,7 @@
   h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.02em; }
   h1 small { font-size: .9rem; color: var(--muted); font-weight: 500; margin-left: 6px; }
   h2 { font-size: 1.05rem; margin: 28px 0 10px; }
+  h2 .muted { font-weight: 400; }
   .status { font-size: .8rem; color: var(--muted); }
   .card { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
   .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
@@ -39,14 +42,22 @@
   button { font: inherit; border: 1px solid var(--line); background: var(--paper); color: var(--ink);
            border-radius: 8px; padding: 9px 14px; cursor: pointer; }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button.wa { background: var(--wa); border-color: var(--wa); color: #fff; font-weight: 600; }
   button:disabled { opacity: .5; cursor: progress; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .row > .grow { flex: 1 1 160px; }
   .tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .tabs button { flex: 1; }
   .tabs button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
   .muted { color: var(--muted); font-size: .85rem; }
   .err { background: var(--hard-bg); color: var(--hard); border-radius: 8px; padding: 10px; margin-top: 10px; }
   .note { background: var(--info-bg); color: var(--info); border-radius: 8px; padding: 10px; margin-top: 10px; }
+  .mic { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 8px 0 4px; }
+  .mic button { width: 96px; height: 96px; border-radius: 50%; font-size: 2.2rem; line-height: 1;
+                background: var(--accent); border: 0; color: var(--accent-ink); }
+  .mic button.rec { background: var(--credit); animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 12px rgba(180,70,43,.15); } }
+  .mic .timer { font-variant-numeric: tabular-nums; font-weight: 600; }
   .photo { position: relative; margin-top: 12px; border-radius: 8px; overflow: hidden; }
   .photo img { display: block; width: 100%; }
   .box { position: absolute; border: 2px solid var(--warn); background: rgba(241,196,106,.12); border-radius: 3px; }
@@ -54,6 +65,7 @@
   .box i { position: absolute; top: -2px; left: -2px; background: var(--warn); color: #000; font: 700 11px/1 system-ui;
            padding: 2px 4px; font-style: normal; }
   .box.on i { background: var(--accent); color: var(--accent-ink); }
+  audio { width: 100%; margin-top: 10px; }
   .entry { margin-top: 12px; }
   .entry.done { opacity: .75; }
   .entry-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -64,12 +76,21 @@
               border-left: 3px solid var(--line); padding: 4px 8px; margin: 0 0 10px; word-break: break-word; }
   .fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
   .fields label { display: flex; flex-direction: column; gap: 3px; font-size: .75rem; color: var(--muted); }
-  .fields label.wide { grid-column: 1 / -1; }
-  .fields label.bad input, .fields label.bad .seg { outline: 2px solid var(--hard); outline-offset: 1px; border-radius: 8px; }
+  .fields .wide { grid-column: 1 / -1; }
+  .fields label.bad input, .fields label.bad .seg, .who.bad { outline: 2px solid var(--hard); outline-offset: 1px; border-radius: 8px; }
   .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .seg button { flex: 1; border: 0; border-radius: 0; padding: 9px 4px; font-size: .9rem; background: var(--bg); }
   .seg button[aria-pressed="true"].credit { background: var(--credit); color: #fff; }
   .seg button[aria-pressed="true"].repay { background: var(--repay); color: #fff; }
+  .who { display: grid; gap: 6px; font-size: .9rem; color: var(--ink); }
+  .fields .who .pick { display: flex; flex-direction: row; gap: 8px; align-items: center; border: 1px solid var(--line);
+               border-radius: 8px; padding: 8px 10px; cursor: pointer; background: var(--bg);
+               font-size: .9rem; color: var(--ink); text-align: left; }
+  .who .pick:has(input:checked) { border-color: var(--accent); outline: 1px solid var(--accent); }
+  .who .pick input { width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--accent); }
+  .who .pick span { flex: 1; }
+  .who .pick span.amt { flex: none; }
+  .newfields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
   .flags { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
   .flags li { border-radius: 8px; padding: 7px 10px; font-size: .88rem; }
   .flags li.hard { background: var(--hard-bg); color: var(--hard); }
@@ -81,10 +102,16 @@
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
   .saved { margin-top: 10px; font-weight: 600; color: var(--repay); }
   .list { display: grid; gap: 6px; }
-  .cust { display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left; }
-  .amt { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .cust { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; text-align: left; }
+  .cust small, .due small { color: var(--muted); font-size: .8rem; }
+  .amt { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
   .owes { color: var(--credit); }
   .clear { color: var(--repay); }
+  .due { display: grid; gap: 8px; }
+  .due-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .due .row button { flex: 1 1 auto; }
+  .tag { display: inline-block; font-size: .72rem; font-weight: 600; padding: 1px 7px; border-radius: 99px;
+         background: var(--warn-bg); color: var(--warn); }
   table { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
   td, th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
   th { color: var(--muted); font-weight: 500; font-size: .75rem; }
@@ -112,8 +139,9 @@
   <h2>Add entries</h2>
   <div class="card">
     <div class="tabs">
+      <button type="button" data-tab="voice" aria-pressed="false">🎙 Speak</button>
       <button type="button" data-tab="text" aria-pressed="true">Type</button>
-      <button type="button" data-tab="photo" aria-pressed="false">Photo of book</button>
+      <button type="button" data-tab="photo" aria-pressed="false">Photo</button>
     </div>
     <form id="text-form">
       <textarea id="text-in" maxlength="2000" placeholder="Rajan 350 pattu, Suresh 200 thannu"></textarea>
@@ -122,6 +150,13 @@
         <button class="primary" type="submit">Read</button>
       </div>
     </form>
+    <div id="voice-form" hidden>
+      <div class="mic">
+        <button type="button" id="mic-btn" aria-label="Start recording">🎙</button>
+        <span class="timer" id="mic-timer">Tap to speak</span>
+        <span class="muted" style="text-align:center">Say it like you'd write it: “Rajan munnooru pattu, Suresh irunooru thannu”.<br>Tap again to stop.</span>
+      </div>
+    </div>
     <form id="photo-form" hidden>
       <input id="photo-in" type="file" accept="image/jpeg,image/png,image/webp" capture="environment">
       <input id="hint-in" type="text" maxlength="300" placeholder="Optional note, e.g. “page is from October”" style="margin-top:8px">
@@ -140,21 +175,31 @@
     <div id="entries"></div>
   </section>
 
+  <h2>Pattu to collect <span class="muted" id="due-count"></span></h2>
+  <div id="due" class="list"><span class="muted">Nobody owes anything.</span></div>
+
   <h2>Customers</h2>
   <div id="customers" class="list"><span class="muted">No customers yet.</span></div>
 
   <section id="history" hidden>
     <h2 id="history-title"></h2>
-    <div class="card"><table><thead><tr><th>Date</th><th>Entry</th><th class="r">Amount</th><th class="r">Balance</th><th></th></tr></thead>
-      <tbody id="history-body"></tbody></table></div>
+    <div class="card">
+      <div class="newfields" style="margin-bottom:10px">
+        <label class="muted">Note (to tell apart same names)<input id="h-label" maxlength="60" placeholder="e.g. auto driver"></label>
+        <label class="muted">WhatsApp number<input id="h-phone" inputmode="tel" maxlength="20" placeholder="98470 12345"></label>
+      </div>
+      <div class="row"><span class="muted grow" id="h-msg"></span><button type="button" id="h-save">Save details</button></div>
+      <table style="margin-top:10px"><thead><tr><th>Date</th><th>Entry</th><th class="r">Amount</th><th class="r">Balance</th><th></th></tr></thead>
+        <tbody id="history-body"></tbody></table>
+    </div>
   </section>
 </main>
 
 <script>
-const HARD = new Set(["unclear_direction", "missing_customer", "missing_amount", "invalid_amount", "illegible", "missing_date", "invalid_date"]);
-const SOFT = new Set(["uncertain_amount", "amount_from_balance", "possible_duplicate", "similar_customer", "overpayment"]);
+const HARD = new Set(["unclear_direction", "missing_customer", "missing_amount", "invalid_amount", "illegible", "missing_date", "invalid_date", "ambiguous_customer"]);
+const SOFT = new Set(["uncertain_amount", "amount_from_balance", "possible_duplicate", "similar_customer", "overpayment", "same_name_customer"]);
 const FIELD_OF = { unclear_direction: "type", missing_customer: "name", missing_amount: "amount", invalid_amount: "amount",
-                   uncertain_amount: "amount", missing_date: "date", invalid_date: "date" };
+                   uncertain_amount: "amount", missing_date: "date", invalid_date: "date", ambiguous_customer: "who" };
 let FLAG_TEXT = {};
 let today = new Date().toISOString().slice(0, 10);
 
@@ -162,6 +207,9 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const shortDate = d => new Date(d + "T00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 const rupees = n => n == null ? "–" : "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+const who = c => esc(c.name) + (c.label ? ` <small>· ${esc(c.label)}</small>` : "");
+const owesText = b => b > 0 ? "owes " + rupees(b) : b < 0 ? "advance " + rupees(-b) : "settled";
+const days = n => n == null ? null : n === 0 ? "today" : n === 1 ? "yesterday" : `${n} days ago`;
 
 async function api(path, opts = {}) {
   const r = await fetch(path, opts);
@@ -174,13 +222,16 @@ async function api(path, opts = {}) {
   }
   return body;
 }
-const postJSON = (path, data) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+const sendJSON = (method, path, data) => api(path, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+const postJSON = (path, data) => sendJSON("POST", path, data);
 
 function detailText(d) {
   if (!d) return "";
   if (typeof d === "string") return d;
   if (Array.isArray(d)) return d.map(x => `${(x.loc || []).slice(1).join(".")}: ${x.msg}`).join("; ");
   if (d.error === "acknowledgement_required") return "Please tick the warnings below before saving.";
+  if (d.error === "customer_choice_required") return "More than one customer has this name. Choose which one.";
+  if (d.error === "nothing_owed") return "This customer doesn't owe anything.";
   return JSON.stringify(d);
 }
 
@@ -189,7 +240,7 @@ function busy(btn, on, label) {
   else { btn.textContent = btn.dataset.label; btn.disabled = false; }
 }
 
-// ---------- header / summary / customers ----------
+// ---------- header / summary / reminders / customers ----------
 async function loadHealth() {
   try {
     const h = await api("/api/health");
@@ -209,23 +260,73 @@ async function refresh() {
   try {
     const cs = await api("/api/customers");
     const box = $("#customers");
-    if (!cs.length) { box.innerHTML = '<span class="muted">No customers yet.</span>'; return; }
-    box.innerHTML = cs.map(c => `<button class="cust card" data-name="${esc(c.name)}">
-        <span>${esc(c.name)}</span>
-        <span class="amt ${c.balance > 0 ? "owes" : "clear"}">${c.balance > 0 ? "owes " + rupees(c.balance) : c.balance < 0 ? "advance " + rupees(-c.balance) : "settled"}</span>
-      </button>`).join("");
+    box.innerHTML = cs.length ? cs.map(c => `<button class="cust card" data-cid="${c.id}">
+        <span>${who(c)}</span>
+        <span class="amt ${c.balance > 0 ? "owes" : "clear"}">${owesText(c.balance)}</span>
+      </button>`).join("") : '<span class="muted">No customers yet.</span>';
   } catch { /* ignore */ }
+  loadDue();
 }
+
+async function loadDue() {
+  let due;
+  try { due = await api("/api/reminders"); } catch { return; }
+  $("#due-count").textContent = due.length ? `· ${due.length} ${due.length === 1 ? "person" : "people"}` : "";
+  $("#due").innerHTML = due.length ? due.map(d => `<div class="card due" data-cid="${d.id}">
+      <div class="due-top"><span>${who(d)}</span><span class="amt owes">${rupees(d.balance)}</span></div>
+      <small>${d.days_since_payment == null ? "Never paid back" : "Last paid " + days(d.days_since_payment)}
+        · last credit ${days(d.days_since_credit)}${d.phone ? "" : " · no WhatsApp number"}</small>
+      ${d.recently_reminded ? `<span><span class="tag">Reminded ${days(d.days_since_reminder)}</span></span>` : ""}
+      <div class="row">
+        <button type="button" class="wa" data-remind="${d.id}">Remind on WhatsApp</button>
+        <button type="button" data-copy="${d.id}">Copy message</button>
+      </div>
+    </div>`).join("") : '<span class="muted">Nobody owes anything.</span>';
+  $("#due").__data = Object.fromEntries(due.map(d => [d.id, d]));
+}
+
+$("#due").addEventListener("click", async e => {
+  const data = $("#due").__data || {};
+  const copyId = e.target.dataset.copy;
+  if (copyId) {
+    try { await navigator.clipboard.writeText(data[copyId].message); e.target.textContent = "Copied"; }
+    catch { prompt("Copy this message:", data[copyId].message); }
+    return;
+  }
+  const id = e.target.dataset.remind;
+  if (!id) return;
+  const btn = e.target;
+  busy(btn, true, "Opening");
+  try {
+    let r;
+    try { r = await postJSON(`/api/customers/${id}/remind`, {}); }
+    catch (err) {
+      if (err.detail?.flags?.includes("recent_reminder")) {
+        // Don't nag the same customer twice in a row without the shopkeeper saying so.
+        const when = days(Math.floor((Date.now() - Date.parse(err.detail.last_reminded_at)) / 864e5));
+        if (!confirm(`${data[id].name} was already reminded ${when}. Send another reminder?`)) return;
+        r = await postJSON(`/api/customers/${id}/remind`, { acknowledged: ["recent_reminder"] });
+      } else throw err;
+    }
+    if (!window.open(r.whatsapp_url, "_blank")) location.href = r.whatsapp_url;
+  } catch (err) { alert(err.message); }
+  finally { busy(btn, false); loadDue(); }
+});
 
 $("#customers").addEventListener("click", e => {
   const b = e.target.closest(".cust");
-  if (b) showHistory(b.dataset.name);
+  if (b) showHistory(b.dataset.cid);
 });
 
-async function showHistory(name) {
-  const c = await api(`/api/customers/${encodeURIComponent(name)}`);
+let historyId = null;
+async function showHistory(cid) {
+  const c = await api(`/api/customers/${cid}`);
+  historyId = cid;
   $("#history").hidden = false;
-  $("#history-title").textContent = `${c.name} — ${c.balance > 0 ? "owes " + rupees(c.balance) : "balance " + rupees(c.balance)}`;
+  $("#history-title").innerHTML = `${who(c)} — ${owesText(c.balance)}`;
+  $("#h-label").value = c.label || "";
+  $("#h-phone").value = c.phone ? c.phone.replace(/^91/, "") : "";
+  $("#h-msg").textContent = c.last_reminder ? `Last reminded ${shortDate(c.last_reminder.created_at.slice(0, 10))}` : "";
   const label = { credit_sale: "Credit", repayment: "Paid", reversal: "Undo" };
   $("#history-body").innerHTML = c.history.map(t => `<tr class="${t.reversed ? "struck" : ""}">
       <td style="white-space:nowrap">${esc(shortDate(t.date))}</td>
@@ -237,13 +338,20 @@ async function showHistory(name) {
   $("#history").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+$("#h-save").addEventListener("click", async () => {
+  try {
+    await sendJSON("PATCH", `/api/customers/${historyId}`, { label: $("#h-label").value, phone: $("#h-phone").value });
+    await refresh(); await showHistory(historyId);
+    $("#h-msg").textContent = "Saved.";
+  } catch (err) { $("#h-msg").textContent = err.message; }
+});
+
 $("#history-body").addEventListener("click", async e => {
   const id = e.target.dataset.undo;
   if (!id || !confirm("Undo this entry? It stays in the history as reversed.")) return;
-  const name = $("#history-title").textContent.split(" — ")[0];
   try {
     await api(`/api/transactions/${id}/reverse?reason=${encodeURIComponent("undone by shopkeeper")}`, { method: "POST" });
-    await refresh(); await showHistory(name);
+    await refresh(); await showHistory(historyId);
   } catch (err) { alert(err.message); }
 });
 
@@ -251,6 +359,7 @@ $("#history-body").addEventListener("click", async e => {
 document.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => {
   document.querySelectorAll("[data-tab]").forEach(x => x.setAttribute("aria-pressed", x === b));
   $("#text-form").hidden = b.dataset.tab !== "text";
+  $("#voice-form").hidden = b.dataset.tab !== "voice";
   $("#photo-form").hidden = b.dataset.tab !== "photo";
 }));
 
@@ -262,7 +371,7 @@ $("#text-form").addEventListener("submit", async e => {
   if (!text) return;
   const btn = e.submitter || $("button[type=submit]", e.target);
   busy(btn, true, "Reading"); showError("");
-  try { renderProposal(await postJSON("/api/extract/text", { text }), null); $("#text-in").value = ""; }
+  try { renderProposal(await postJSON("/api/extract/text", { text })); $("#text-in").value = ""; }
   catch (err) { showError(err.message); }
   finally { busy(btn, false); }
 });
@@ -276,15 +385,72 @@ $("#photo-form").addEventListener("submit", async e => {
   fd.append("hint", $("#hint-in").value.trim());
   const btn = e.submitter || $("button[type=submit]", e.target);
   busy(btn, true, "Reading page"); showError("");
-  try { const r = await api("/api/extract/image", { method: "POST", body: fd }); renderProposal(r, r.source_ref); }
+  try { renderProposal(await api("/api/extract/image", { method: "POST", body: fd })); }
   catch (err) { showError(err.message); }
   finally { busy(btn, false); }
 });
 
+// ---------- voice: record, convert to 16 kHz mono WAV in the browser (what Meta ASR accepts), upload ----------
+let rec = null;
+const MAX_SECONDS = 60;
+
+$("#mic-btn").addEventListener("click", () => rec ? rec.stop() : startRecording());
+
+async function startRecording() {
+  showError("");
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch { showError("Microphone not available. Allow mic access for this site (needs https or localhost)."); return; }
+  const chunks = [];
+  const mr = new MediaRecorder(stream);
+  const btn = $("#mic-btn"), timer = $("#mic-timer");
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    timer.textContent = `Recording… 0:${String(s).padStart(2, "0")}`;
+    if (s >= MAX_SECONDS) mr.stop();
+  }, 250);
+  mr.ondataavailable = e => e.data.size && chunks.push(e.data);
+  mr.onstop = async () => {
+    clearInterval(tick);
+    stream.getTracks().forEach(t => t.stop());
+    rec = null;
+    btn.classList.remove("rec"); btn.disabled = true; btn.setAttribute("aria-label", "Start recording");
+    timer.innerHTML = '<span class="spinner"></span> Listening…';
+    try {
+      const wav = await toWav16k(new Blob(chunks, { type: mr.mimeType }));
+      const fd = new FormData();
+      fd.append("file", wav, "voice.wav");
+      renderProposal(await api("/api/extract/voice", { method: "POST", body: fd }));
+    } catch (err) { showError(err.message); }
+    finally { btn.disabled = false; timer.textContent = "Tap to speak"; }
+  };
+  mr.start();
+  rec = mr;
+  btn.classList.add("rec"); btn.setAttribute("aria-label", "Stop recording");
+}
+
+async function toWav16k(blob) {
+  const RATE = 16000;
+  const decoded = await new AudioContext().decodeAudioData(await blob.arrayBuffer());
+  const off = new OfflineAudioContext(1, Math.ceil(decoded.duration * RATE), RATE);
+  const src = off.createBufferSource();
+  src.buffer = decoded; src.connect(off.destination); src.start();
+  const pcm = (await off.startRendering()).getChannelData(0);
+  const buf = new ArrayBuffer(44 + pcm.length * 2), v = new DataView(buf);
+  const str = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  str(0, "RIFF"); v.setUint32(4, 36 + pcm.length * 2, true); str(8, "WAVE");
+  str(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, pcm.length * 2, true);
+  pcm.forEach((x, i) => v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, x)) * 0x7fff, true));
+  return new Blob([buf], { type: "audio/wav" });
+}
+
 // ---------- proposal review ----------
 let current = null;
 
-function renderProposal(p, sourceRef) {
+function renderProposal(p) {
   current = p;
   $("#proposal").hidden = false;
   const note = $("#proposal-note");
@@ -292,26 +458,32 @@ function renderProposal(p, sourceRef) {
   if (p.intent === "balance_query") {
     const a = p.balance_answer;
     noteText = !a ? "That looks like a question, but no customer name was found."
+      : a.matches ? `${a.matches.length} customers are called ${a.customer}: ` +
+          a.matches.map(m => `${m.name}${m.label ? " (" + m.label + ")" : ""} ${owesText(m.balance)}`).join("; ") + "."
       : a.balance == null ? `${a.customer}: ${a.message}.`
-      : `${a.customer} ${a.balance > 0 ? "owes " + rupees(a.balance) : "has balance " + rupees(a.balance)} (from the ledger).`;
+      : `${a.customer} ${owesText(a.balance)} (from the ledger).`;
   } else if (p.intent === "not_ledger") {
     noteText = "No credit or repayment here (e.g. a cash sale), so nothing to save." + (p.note ? " " + p.note : "");
   } else if (p.intent === "unclear") {
     noteText = "Couldn't understand this. " + (p.note || "Try rephrasing.");
   }
-  note.textContent = noteText; note.hidden = !noteText;
+  if (p.source_type === "voice") noteText = `Heard: “${p.raw_input}”` + (noteText ? "\n" + noteText : "");
+  note.textContent = noteText; note.hidden = !noteText; note.style.whiteSpace = "pre-line";
 
   $("#proposal-title").textContent = p.entries.length
     ? `Check before saving (${p.entries.length} ${p.entries.length === 1 ? "entry" : "entries"})` : "Result";
 
   const pv = $("#photo-view");
-  if (sourceRef) {
+  const src = p.source_ref ? `/api/sources/${encodeURIComponent(p.source_ref)}` : null;
+  if (src && p.source_type === "image") {
     pv.hidden = false;
-    pv.innerHTML = `<img src="/api/sources/${encodeURIComponent(sourceRef)}" alt="Uploaded ledger page">` +
+    pv.innerHTML = `<img src="${src}" alt="Uploaded ledger page">` +
       p.entries.filter(e => Array.isArray(e.box) && e.box.length === 4).map(e => {
         const [x0, y0, x1, y1] = e.box.map(v => Math.max(0, Math.min(1000, v)) / 10);
         return `<div class="box" data-box="${e.index}" style="left:${x0}%;top:${y0}%;width:${x1 - x0}%;height:${y1 - y0}%"><i>${e.index + 1}</i></div>`;
       }).join("");
+  } else if (src && p.source_type === "voice") {
+    pv.hidden = false; pv.innerHTML = `<audio controls src="${src}"></audio>`;
   } else { pv.hidden = true; pv.innerHTML = ""; }
 
   const host = $("#entries");
@@ -320,20 +492,45 @@ function renderProposal(p, sourceRef) {
   $("#proposal").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function entryCard(e) {
+// Who is this? One existing match, several (must choose), or nobody yet.
+function whoBlock(e, candidates) {
+  const name = esc(e.customer_name || "this name");
+  if (!candidates.length) {
+    return `<div class="who">
+      <div class="newfields">
+        <label class="muted">Note (optional)<input name="label" maxlength="60" placeholder="e.g. auto driver"></label>
+        <label class="muted">WhatsApp (optional)<input name="phone" inputmode="tel" maxlength="20" placeholder="for reminders"></label>
+      </div></div>`;
+  }
+  const several = candidates.length > 1;
+  return `<div class="who ${several ? "bad" : ""}">
+    ${several ? `<b>Which ${name}?</b>` : ""}
+    ${candidates.map((c, i) => `<label class="pick"><input type="radio" name="who-${e.index}" value="${c.id}" ${!several && i === 0 ? "checked" : ""}>
+        <span>${who(c)}</span><span class="amt ${c.balance > 0 ? "owes" : "clear"}">${owesText(c.balance)}</span></label>`).join("")}
+    <label class="pick"><input type="radio" name="who-${e.index}" value="new">
+      <span>Someone else also called ${name}</span></label>
+    <div class="newfields" data-newfields hidden>
+      <label class="muted">Note to tell them apart (required)<input name="label" maxlength="60" placeholder="e.g. teacher, near church"></label>
+      <label class="muted">WhatsApp (optional)<input name="phone" inputmode="tel" maxlength="20" placeholder="for reminders"></label>
+    </div></div>`;
+}
+
+function entryCard(e, candidatesOverride) {
   const el = document.createElement("div");
   el.className = "card entry";
   el.dataset.index = e.index;
+  const candidates = candidatesOverride || e.candidates || [];
   const bad = new Set(e.flags.filter(f => HARD.has(f)).map(f => FIELD_OF[f]).filter(Boolean));
   const type = e.transaction_type;
   el.innerHTML = `
     <div class="entry-head">
-      <b>#${e.index + 1}${e.matched_customer ? ` · ${esc(e.matched_customer)} owes ${rupees(e.current_balance)}` : ""}</b>
+      <b>#${e.index + 1}</b>
       <span class="pill ${e.status === "ready" ? "ready" : "review"}">${e.status === "ready" ? "Looks right" : "Needs your check"}</span>
     </div>
     ${e.evidence ? `<p class="evidence">${esc(e.evidence)}</p>` : ""}
     <div class="fields">
       <label class="wide ${bad.has("name") ? "bad" : ""}">Customer<input name="name" value="${esc(e.customer_name)}" placeholder="Name"></label>
+      <div class="wide" data-who>${whoBlock(e, candidates)}</div>
       <label class="wide ${bad.has("type") ? "bad" : ""}">What happened
         <div class="seg" role="group">
           <button type="button" class="credit" data-type="credit_sale" aria-pressed="${type === "credit_sale"}">Took on credit (pattu)</button>
@@ -355,6 +552,27 @@ function entryCard(e) {
   el.querySelector("[data-use-name]")?.addEventListener("click", ev => {
     el.querySelector("input[name=name]").value = ev.target.dataset.useName;
     ev.target.closest("li").remove();
+  });
+  el.querySelector("input[name=name]").addEventListener("input", () => {
+    // A changed name must never keep pointing at the customer picked for the old name.
+    if (!el.querySelector("[data-who] input[type=radio]")) return;
+    el.querySelector("[data-who]").innerHTML = whoBlock(e, []);
+    el.querySelector('[data-flag="ambiguous_customer"]')?.remove();
+    el.querySelector('[data-flag="same_name_customer"]')?.remove();
+  });
+  el.querySelector("[data-who]").addEventListener("change", ev => {
+    if (ev.target.type !== "radio") return;
+    const isNew = ev.target.value === "new";
+    el.querySelector("[data-newfields]").hidden = !isNew;
+    el.querySelector(".who").classList.remove("bad");
+    el.querySelector('[data-flag="ambiguous_customer"]')?.remove();
+    // These were computed against the previously chosen account; the server re-checks the new choice on save.
+    el.querySelectorAll('[data-flag="possible_duplicate"], [data-flag="overpayment"]').forEach(x => x.remove());
+    const ul = el.querySelector(".flags");
+    // Opening a second account under an existing name is a deliberate act: make it visible and ticked.
+    const existing = ul.querySelector('[data-flag="same_name_customer"]');
+    if (isNew && !existing) ul.insertAdjacentHTML("afterbegin", flagItem("same_name_customer", e));
+    if (!isNew) existing?.remove();
   });
   el.querySelector("[data-act=skip]").addEventListener("click", () => skipEntry(el, e));
   el.querySelector("[data-act=confirm]").addEventListener("click", () => confirmEntry(el, e));
@@ -381,6 +599,8 @@ function flagItem(f, e) {
 }
 
 function readCard(el) {
+  const choice = el.querySelector("[data-who] input[type=radio]:checked")?.value;
+  const hasChoices = !!el.querySelector("[data-who] input[type=radio]");
   return {
     name: el.querySelector("input[name=name]").value.trim(),
     type: el.querySelector("[data-type][aria-pressed=true]")?.dataset.type || null,
@@ -388,6 +608,11 @@ function readCard(el) {
     date: el.querySelector("input[name=date]").value,
     desc: el.querySelector("input[name=desc]").value.trim() || null,
     acks: [...el.querySelectorAll("[data-ack]:checked")].map(x => x.dataset.ack),
+    hasChoices, choice,
+    customerId: choice && choice !== "new" ? choice : null,
+    isNew: choice === "new",
+    label: el.querySelector("[data-who] input[name=label]")?.value.trim() || null,
+    phone: el.querySelector("[data-who] input[name=phone]")?.value.trim() || null,
   };
 }
 
@@ -397,6 +622,8 @@ async function confirmEntry(el, e) {
   const v = readCard(el);
   const missing = [];
   if (!v.name) missing.push("customer name");
+  if (v.hasChoices && !v.choice) missing.push("which customer");
+  if (v.isNew && !v.label) missing.push("a note to tell the two apart");
   if (!v.type) missing.push("credit or paid back");
   if (!(v.amount > 0)) missing.push("amount");
   if (!v.date) missing.push("date");
@@ -410,12 +637,16 @@ async function confirmEntry(el, e) {
     const r = await postJSON(`/api/proposals/${current.proposal_id}/confirm`, {
       index: e.index, customer_name: v.name, transaction_type: v.type, amount: v.amount,
       transaction_date: v.date, description: v.desc, acknowledged: v.acks,
+      customer_id: v.customerId, new_customer: v.isNew, customer_label: v.label, customer_phone: v.phone,
     });
-    finish(el, `Saved. ${r.customer} ${r.balance > 0 ? "now owes " + rupees(r.balance) : r.balance < 0 ? "has an advance of " + rupees(-r.balance) : "is settled"}.`);
+    finish(el, `Saved. ${r.customer}${r.label ? " (" + r.label + ")" : ""} ${r.balance > 0 ? "now owes " + rupees(r.balance) : r.balance < 0 ? "has an advance of " + rupees(-r.balance) : "is settled"}.`);
     refresh();
   } catch (err) {
     busy(btn, false);
-    if (err.status === 409 && err.detail?.flags) {
+    if (err.status === 409 && err.detail?.error === "customer_choice_required") {
+      // The name now fits several customers (e.g. it was edited): show the picker.
+      el.querySelector("[data-who]").innerHTML = whoBlock({ ...e, customer_name: v.name }, err.detail.candidates);
+    } else if (err.status === 409 && err.detail?.flags) {
       // The server re-checked the final values and found warnings we haven't shown yet.
       const ul = el.querySelector(".flags");
       err.detail.flags.forEach(f => {

@@ -1,4 +1,5 @@
-"""Calls Muse Spark through Meta Model API (OpenAI-compatible Chat Completions + structured output).
+"""Calls Muse Spark through Meta Model API (OpenAI-compatible Chat Completions + structured output),
+and Muse Voice Transcribe for voice notes.
 
 Failures are raised as ExtractionError. There is no fallback that pretends the model answered.
 """
@@ -6,9 +7,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import mimetypes
 import time
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -16,7 +19,7 @@ from typing import Optional
 from pydantic import ValidationError
 
 from .config import settings
-from .prompts import RESPONSE_SCHEMA, SYSTEM_PROMPT, USER_IMAGE_TEMPLATE, USER_TEXT_TEMPLATE
+from .prompts import RESPONSE_SCHEMA, SYSTEM_PROMPT, USER_IMAGE_TEMPLATE, USER_TEXT_TEMPLATE, USER_VOICE_TEMPLATE
 from .schemas import ModelOutput
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
@@ -55,7 +58,9 @@ def _cost(usage: Optional[dict]) -> Optional[float]:
                  + usage.get("completion_tokens", 0) / 1e6 * settings.price_out, 6)
 
 
-def _call(messages: list[dict], cache_key: str) -> Extraction:
+def _call(messages: list[dict], cache_key: str, effort: str) -> Extraction:
+    if effort:
+        cache_key = f"effort={effort}|{cache_key}"
     path = _cache_path(cache_key)
     if settings.cache and path.exists():
         data = json.loads(path.read_text())
@@ -68,8 +73,8 @@ def _call(messages: list[dict], cache_key: str) -> Extraction:
         response_format={"type": "json_schema",
                          "json_schema": {"name": "kanakku_entries", "schema": RESPONSE_SCHEMA}},
     )
-    if settings.reasoning_effort:
-        kwargs["reasoning_effort"] = settings.reasoning_effort
+    if effort:
+        kwargs["reasoning_effort"] = effort
 
     t0 = time.monotonic()
     try:
@@ -102,7 +107,61 @@ def _call(messages: list[dict], cache_key: str) -> Extraction:
 def extract_text(text: str, today: str) -> Extraction:
     user = USER_TEXT_TEMPLATE.format(today=today, text=text.strip())
     messages = [{"role": "developer", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
-    return _call(messages, f"{settings.model}|{SYSTEM_PROMPT}|{user}")
+    return _call(messages, f"{settings.model}|{SYSTEM_PROMPT}|{user}", settings.reasoning_effort)
+
+
+def extract_voice_transcript(transcript: str, today: str) -> Extraction:
+    user = USER_VOICE_TEMPLATE.format(today=today, text=transcript.strip())
+    messages = [{"role": "developer", "content": SYSTEM_PROMPT}, {"role": "user", "content": user}]
+    return _call(messages, f"{settings.model}|{SYSTEM_PROMPT}|{user}", settings.reasoning_effort)
+
+
+# Words the shopkeeper says that a general speech model would mishear. Customer names are added per call.
+VOICE_KEYWORDS = ["pattu", "thannu", "kadam", "adachu", "baaki", "muzhuvan", "chechi", "chettan", "ikka"]
+
+
+def check_wav(data: bytes) -> int:
+    """Meta ASR takes mono 16-bit PCM WAV at 16 or 24 kHz. Returns duration in ms."""
+    try:
+        with wave.open(io.BytesIO(data)) as w:
+            ch, width, rate, frames = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
+    except (wave.Error, EOFError) as e:
+        raise ExtractionError(f"Not a WAV file: {e}") from e
+    if ch != 1 or width != 2 or rate not in (16000, 24000):
+        raise ExtractionError(f"Need mono 16-bit WAV at 16/24 kHz, got {ch} ch, {width * 8}-bit, {rate} Hz")
+    ms = frames * 1000 // rate
+    if ms > 10 * 60 * 1000:
+        raise ExtractionError("Voice note is longer than 10 minutes")
+    return ms
+
+
+def transcribe(wav: bytes, keywords: list[str]) -> dict:
+    """Returns {"transcript", "duration_ms", "cost_usd", "cached"}. Cached on disk like model calls."""
+    duration = check_wav(wav)
+    req = {"mode": "PUSH_TO_TALK", "model": settings.asr_model, "audioEncoding": "WAV",
+           "languageBias": ["English"], "keywords": (VOICE_KEYWORDS + keywords)[:100]}
+    path = _cache_path(f"asr|{json.dumps(req, sort_keys=True)}|{hashlib.sha256(wav).hexdigest()}")
+    if settings.cache and path.exists():
+        return {**json.loads(path.read_text()), "cached": True}
+    if not settings.api_key:
+        raise ExtractionError("MODEL_API_KEY is not set. Put it in backend/.env")
+    import httpx
+    try:
+        r = httpx.post(f"{settings.base_url}/asr/transcribe", headers={"Authorization": f"Bearer {settings.api_key}"},
+                       files={"request": (None, json.dumps(req), "application/json"),
+                              "audio": ("voice.wav", wav, "audio/wav")}, timeout=90)
+    except httpx.HTTPError as e:
+        raise ExtractionError(f"Voice transcription failed: {type(e).__name__}: {e}") from e
+    if r.status_code != 200:
+        raise ExtractionError(f"Voice transcription failed: HTTP {r.status_code}: {r.text[:300]}")
+    body = r.json()
+    ms = body.get("audioDurationMs") or duration
+    out = {"transcript": (body.get("transcript") or "").strip(), "duration_ms": ms,
+           "cost_usd": round(ms // 1000 / 3600 * settings.asr_price_per_hour, 6)}
+    if settings.cache:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(out, ensure_ascii=False))
+    return {**out, "cached": False}
 
 
 def extract_image(image_bytes: bytes, mime: str, today: str, hint: str = "") -> Extraction:
@@ -118,7 +177,7 @@ def extract_image(image_bytes: bytes, mime: str, today: str, hint: str = "") -> 
         ]},
     ]
     img_hash = hashlib.sha256(image_bytes).hexdigest()
-    return _call(messages, f"{settings.model}|{SYSTEM_PROMPT}|{user}|img:{img_hash}")
+    return _call(messages, f"{settings.model}|{SYSTEM_PROMPT}|{user}|img:{img_hash}", settings.image_reasoning_effort)
 
 
 def guess_mime(path: str) -> str:

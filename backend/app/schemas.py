@@ -34,6 +34,8 @@ class Flag(str, Enum):
     new_customer = "new_customer"
     overpayment = "overpayment"
     invalid_date = "invalid_date"
+    ambiguous_customer = "ambiguous_customer"    # 2+ customers share this name: pick one
+    same_name_customer = "same_name_customer"    # creating a second account with an existing name
 
 
 MODEL_FLAGS = [
@@ -44,12 +46,12 @@ MODEL_FLAGS = [
 # Hard flags = a required field is missing/invalid. Cannot be confirmed until the user fills it.
 HARD_FLAGS = {
     Flag.unclear_direction, Flag.missing_customer, Flag.missing_amount,
-    Flag.invalid_amount, Flag.illegible, Flag.missing_date, Flag.invalid_date,
+    Flag.invalid_amount, Flag.illegible, Flag.missing_date, Flag.invalid_date, Flag.ambiguous_customer,
 }
 # Soft flags = values exist but a human must explicitly acknowledge them.
 SOFT_FLAGS = {
     Flag.uncertain_amount, Flag.amount_from_balance, Flag.possible_duplicate,
-    Flag.similar_customer, Flag.overpayment,
+    Flag.similar_customer, Flag.overpayment, Flag.same_name_customer,
 }
 # Info flags = shown, never block.
 INFO_FLAGS = {Flag.new_customer}
@@ -87,6 +89,8 @@ class ProposedEntry(BaseModel):
     flags: list[Flag]
     flag_messages: dict[str, str]
     matched_customer: Optional[str] = None     # existing ledger name this maps to, if any
+    matched_customer_id: Optional[str] = None
+    candidates: list[dict] = Field(default_factory=list)  # every existing customer with this name
     similar_to: Optional[str] = None
     duplicate_of: Optional[str] = None         # transaction id
     current_balance: Optional[float] = None
@@ -95,7 +99,7 @@ class ProposedEntry(BaseModel):
 
 class ExtractionResult(BaseModel):
     proposal_id: str
-    source_type: Literal["text", "image"]
+    source_type: Literal["text", "image", "voice"]
     source_ref: Optional[str]
     raw_input: Optional[str]
     intent: str
@@ -110,6 +114,12 @@ class ExtractionResult(BaseModel):
 class ConfirmRequest(BaseModel):
     index: int
     customer_name: str
+    # Which existing customer this is. Required when several share the name.
+    customer_id: Optional[str] = None
+    # True = open a NEW account even though the name exists. Needs a label to tell them apart.
+    new_customer: bool = False
+    customer_label: Optional[str] = Field(default=None, max_length=60)
+    customer_phone: Optional[str] = Field(default=None, max_length=20)
     transaction_type: TxType
     amount: float = Field(gt=0, le=10_000_000)
     transaction_date: date
@@ -119,3 +129,12 @@ class ConfirmRequest(BaseModel):
 
 class SkipRequest(BaseModel):
     index: int
+
+
+class CustomerUpdate(BaseModel):
+    label: Optional[str] = Field(default=None, max_length=60)
+    phone: Optional[str] = Field(default=None, max_length=20)
+
+
+class RemindRequest(BaseModel):
+    acknowledged: list[str] = Field(default_factory=list)

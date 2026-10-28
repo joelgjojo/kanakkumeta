@@ -56,6 +56,21 @@ Message:
 {text}
 >>>"""
 
+USER_VOICE_TEMPLATE = """Today's date: {today}
+Input type: voice note from the shopkeeper, converted to text by a speech-to-text model.
+The transcript may misspell Malayalam words ("Patu" = pattu, "Thanu" = thannu) and may write numbers as words,
+including Malayalam number words in English letters, possibly misspelled:
+pathu 10, irupathu 20, muppathu 30, nalpathu 40, ambathu 50, arupathu 60, ezhupathu 70, enpathu 80,
+thonnooru 90, nooru 100, nootti- (100 + next number, e.g. nootti irupathu 120), irunooru 200, munnooru 300,
+naanooru 400, anjooru 500, arunooru 600, ezhunooru 700, enanooru 800, tholaayiram 900, aayiram 1000,
+randaayiram 2000; "munnoottambathu" 350.
+Convert a spoken amount to digits only when the words clearly name one number; otherwise flag uncertain_amount.
+Put the words used for the amount in amount_text. evidence = the part of the transcript for that entry.
+Transcript:
+<<<
+{text}
+>>>"""
+
 USER_IMAGE_TEMPLATE = """Today's date: {today}
 Input type: photo of a handwritten account-book page.
 Read every row. One entry per transaction row. Skip headers and totals rows (do not add up totals yourself).
